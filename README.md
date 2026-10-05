@@ -2,6 +2,38 @@
 
 Vue 3 + TypeScript + Vite，监听 **10111**，通过同源 `/api` 调用主控 **10110**。数据来自主控 SQLite，没有浏览器模拟数据。
 
+## 服务器独立部署脚本（推荐）
+
+原生部署，不使用 Docker。支持 Ubuntu 22.04+/Debian 12+、systemd、x86_64 或 arm64。脚本自动安装 Nginx、独立的 Node.js 24 工具链和 pnpm，完成前端构建与 Nginx 配置。需要能访问软件源、nodejs.org 和 npm registry。先部署后端，再执行：
+
+```sh
+sudo mkdir -p /opt/anquan
+sudo apt-get update
+sudo apt-get install -y git
+cd /opt/anquan
+sudo git clone https://github.com/userreksai/anquan-server-web.git
+cd anquan-server-web
+# 同一台服务器部署前后端
+sudo sh deploy/deploy.sh 127.0.0.1:10110
+# 如果后端在另一台服务器，改用其内网 IP，例如：
+# sudo sh deploy/deploy.sh 192.168.1.10:10110
+```
+
+访问 `http://前端服务器IP:10111`，默认账号 `admin`，密码 `admin1818.`（包含末尾英文句点）。Nginx 将 `/api` 转发到指定后端地址，并保留浏览器 Host；后端地址不要填写 `http://` 或路径。服务器需开放 TCP 10111，并能访问后端 TCP 10110。
+
+脚本检查后端连通性、构建页面，然后部署到 `/var/www/anquan/releases/`，Nginx 配置为 `/etc/nginx/conf.d/anquan.conf`。构建失败不切换站点；配置检查或服务重载失败会恢复原配置和站点链接。旧版本目录保留。Node 安装在 `/opt/anquan-tools/`，不覆盖已有系统 Node，下载后验证[官方 SHA256](https://nodejs.org/download/release/v24.21.0/SHASUMS256.txt)。成功部署的后端地址保存在 `.deploy/master-upstream` 中，后续更新无需再次传参：
+
+```sh
+cd /opt/anquan/anquan-server-web
+sudo git pull --ff-only
+sudo sh deploy/deploy.sh
+sudo nginx -t
+sudo systemctl status nginx --no-pager
+sudo tail -f /var/log/nginx/error.log
+```
+
+更换后端地址时重新带参数执行脚本。Nginx 随服务器自动启动；仅管理本站的 `anquan.conf`，保留其他站点配置。首次部署前确认没有其他服务或重复站点配置占用 10111。
+
 ## 本地开发
 
 要求 Node.js 24、pnpm 11.19.0。
