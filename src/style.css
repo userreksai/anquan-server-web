@@ -1433,6 +1433,88 @@ tbody tr:hover {
 .delivery-error svg {
   margin-top: 2px;
 }
+.webhook-test-result {
+  padding: 13px;
+  margin-bottom: 18px;
+  border: 1px solid #e0eafb;
+  border-radius: 7px;
+  background: #f8faff;
+  color: #607b9e;
+  font-size: 11px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.webhook-test-result.is-error {
+  background: #fff9f8;
+  border-color: #f1dfdc;
+}
+.webhook-test-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+.webhook-test-heading svg {
+  flex-shrink: 0;
+}
+.is-success .webhook-test-heading {
+  color: #46866e;
+}
+.is-error .webhook-test-heading {
+  color: #b66c70;
+}
+.webhook-test-heading time {
+  margin-left: auto;
+  color: #8b9cb3;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+}
+.webhook-test-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 12px 0;
+}
+.webhook-test-metrics dt {
+  color: #8b9cb3;
+  font-size: 10px;
+}
+.webhook-test-metrics dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.webhook-test-content summary {
+  cursor: pointer;
+}
+.webhook-test-content pre {
+  margin: 9px 0 0;
+  padding: 10px;
+  max-height: 230px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.8;
+  background: #ffffffb3;
+  border: 1px solid #e6edf5;
+  border-radius: 5px;
+}
+.webhook-test-warning {
+  margin-top: 9px;
+  color: #a87953;
+}
+.webhook-form-test {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0 14px;
+}
+.webhook-form-test p {
+  color: #8b9cb3;
+  font-size: 11px;
+}
 .webhook-card-footer {
   display: flex;
   align-items: center;

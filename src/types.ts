@@ -55,6 +55,24 @@ export interface Webhook {
   pending_count: number
 }
 
+export interface WebhookTestResult {
+  message: string
+  success: boolean
+  text: string
+  format: Webhook['format']
+  http_status?: number
+  business_code?: number
+  duration_ms: number
+}
+
+export interface WebhookTestFeedback {
+  name: string
+  checked_at: string
+  result: WebhookTestResult | null
+  error: string
+  refresh_error?: string
+}
+
 export interface PageResult<T> {
   items: T[]
   total: number

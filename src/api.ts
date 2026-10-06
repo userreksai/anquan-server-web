@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message) }
+  constructor(message: string, public status: number, public details: unknown = null) { super(message) }
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -16,7 +16,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const body = await response.json().catch(() => null)
   if (!response.ok) {
     if (response.status === 401 && path !== '/auth/login') window.dispatchEvent(new Event('auth-expired'))
-    throw new ApiError(body?.message || body?.error || `请求失败（${response.status}）`, response.status)
+    throw new ApiError(body?.message || body?.error || `请求失败（${response.status}）`, response.status, body)
   }
   return body as T
 }
