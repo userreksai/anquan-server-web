@@ -4,7 +4,9 @@ import { Activity, ArrowLeft, ArrowRight, BellRing, Check, CheckCheck, ChevronRi
 import { api, ApiError, query } from './api'
 import { alertTitle, alertKindLabel, moduleLabel } from './event-labels'
 import Pagination from './components/Pagination.vue'
-import type { Machine, Overview, PageResult, SecurityEvent, Webhook } from './types'
+import WebhookTestFeedback from './components/WebhookTestFeedback.vue'
+import { requestWebhookTest } from './webhook-test'
+import type { Machine, Overview, PageResult, SecurityEvent, Webhook, WebhookTestFeedback as TestFeedback } from './types'
 
 type View = 'overview' | 'machines' | 'events' | 'webhooks'
 type Dialog = 'event' | 'machine' | 'webhook' | 'password' | 'delete' | null
@@ -54,6 +56,11 @@ const machineForm = ref({ alias: '', notes: '' })
 const editingHookId = ref<number | null>(null)
 const hookForm = ref({ name: '', url: '', format: 'feishu' as Webhook['format'], enabled: true })
 const testingHook = ref<number | null>(null)
+const testingHookForm = ref(false)
+const hookTestResults = ref<Record<number, TestFeedback>>({})
+const hookFormTestResult = ref<TestFeedback | null>(null)
+const testedHookForm = ref('')
+const hookFormTestStale = computed(() => Boolean(hookFormTestResult.value) && testedHookForm.value !== JSON.stringify(hookForm.value))
 const savingHook = ref(false)
 const passwordForm = ref({ current: '', next: '', confirm: '' })
 const deleteTarget = ref<{ kind: 'event' | 'machine' | 'webhook'; id: string | number; label: string } | null>(null)
@@ -65,7 +72,12 @@ const refreshStatus = computed(() => loading.value ? '正在刷新数据' : page
 const isOnline = (machine: Machine) => machine.status ? machine.status === 'online' : machine.online
 const offlineAfter = (machine: Machine) => machine.offline_after_seconds ?? Math.max((machine.interval_seconds || 300) * 3, 120)
 const tabs = [{ value: '', label: '全部记录' }, { value: 'alert', label: '安全告警' }, { value: 'ssh_login', label: 'SSH 登录' }, { value: 'scan_summary', label: '巡检记录' }]
-const formatNames = { feishu: '飞书机器人', wecom: '企业微信机器人', generic: '通用 Webhook' }
+const formatNames = { feishu: '飞书 / Lark 机器人', wecom: '企业微信机器人', generic: '通用 Webhook' }
+const hookFormatHint = computed(() => ({
+  feishu: '飞书和 Lark 使用相同格式：{"msg_type":"text","content":{"text":"告警正文"}}。',
+  wecom: '企业微信格式：{"msgtype":"text","text":{"content":"告警正文"}}。',
+  generic: '通用 JSON 适用于自建接收服务。Lark 机器人请选择“飞书 / Lark 机器人”。',
+}[hookForm.value.format]))
 const displayTime = (value: string | undefined) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -239,7 +251,14 @@ function editMachine() {
 function editWebhook(hook?: Webhook) {
   editingHookId.value = hook?.id ?? null
   hookForm.value = { name: hook?.name || '', url: hook?.url || '', format: hook?.format || 'feishu', enabled: hook?.enabled ?? true }
+  hookFormTestResult.value = null
+  testedHookForm.value = ''
   void openDialog('webhook')
+}
+function validateWebhookForm() {
+  if (!hookForm.value.name.trim()) { dialogError.value = '请输入通知名称。'; return false }
+  try { const url = new URL(hookForm.value.url.trim()); if (!['http:', 'https:'].includes(url.protocol)) throw new Error() } catch { dialogError.value = '请输入完整的 HTTP 或 HTTPS 通知地址。'; return false }
+  return true
 }
 function openPassword() { passwordForm.value = { current: '', next: '', confirm: '' }; void openDialog('password') }
 function confirmDelete(kind: 'event' | 'machine' | 'webhook', id: string | number, label: string) {
@@ -247,20 +266,22 @@ function confirmDelete(kind: 'event' | 'machine' | 'webhook', id: string | numbe
   void openDialog('delete')
 }
 async function saveDialog() {
+  if (dialogBusy.value) return
   dialogError.value = ''
   if (dialog.value === 'password') {
     if (passwordForm.value.next !== passwordForm.value.confirm) { dialogError.value = '两次输入的新密码不一致。'; return }
     const bytes = new TextEncoder().encode(passwordForm.value.next).length
     if (bytes < 8 || bytes > 72) { dialogError.value = '新密码需要 8–72 字节（中文等字符会占用多个字节）。'; return }
   }
-  if (dialog.value === 'webhook') {
-    try { const url = new URL(hookForm.value.url); if (!['http:', 'https:'].includes(url.protocol)) throw new Error() } catch { dialogError.value = '请输入完整的 HTTP 或 HTTPS 通知地址。'; return }
-  }
+  if (dialog.value === 'webhook' && !validateWebhookForm()) return
   dialogBusy.value = true
   try {
     if (dialog.value === 'event' && activeEvent.value) await api(`/events/${activeEvent.value.id}`, { method: 'PATCH', body: JSON.stringify({ status: eventStatus.value, notes: eventNotes.value }) })
     if (dialog.value === 'machine' && selectedMachine.value) await api(`/machines/${encodeURIComponent(selectedMachine.value.ip)}`, { method: 'PATCH', body: JSON.stringify(machineForm.value) })
-    if (dialog.value === 'webhook') await api(`/webhooks${editingHookId.value === null ? '' : `/${editingHookId.value}`}`, { method: editingHookId.value === null ? 'POST' : 'PUT', body: JSON.stringify(hookForm.value) })
+    if (dialog.value === 'webhook') {
+      await api(`/webhooks${editingHookId.value === null ? '' : `/${editingHookId.value}`}`, { method: editingHookId.value === null ? 'POST' : 'PUT', body: JSON.stringify(hookForm.value) })
+      if (editingHookId.value !== null) delete hookTestResults.value[editingHookId.value]
+    }
     if (dialog.value === 'password') {
       await api('/auth/password', { method: 'PUT', body: JSON.stringify({ current_password: passwordForm.value.current, new_password: passwordForm.value.next }) })
       passwordForm.value = { current: '', next: '', confirm: '' }
@@ -271,6 +292,7 @@ async function saveDialog() {
       await api(`/${base}/${encodeURIComponent(String(target.id))}`, { method: 'DELETE' })
       if (target.kind === 'machine') selectedMachine.value = null
       if (target.kind === 'event' && events.value.length === 1 && eventPage.value > 1) eventPage.value--
+      if (target.kind === 'webhook') delete hookTestResults.value[Number(target.id)]
     }
     const wasPassword = dialog.value === 'password'
     toast(dialog.value === 'delete' ? '已删除。' : wasPassword ? '密码已更新，请重新登录。' : '已保存。')
@@ -282,13 +304,34 @@ async function saveDialog() {
   finally { dialogBusy.value = false }
 }
 async function testWebhook(hook: Webhook) {
+  if (testingHook.value !== null || testingHookForm.value) return
   testingHook.value = hook.id
   try {
-    const result = await api<{ message: string }>(`/webhooks/${hook.id}/test`, { method: 'POST' })
-    toast(result.message || '测试通知发送成功。')
-    await loadPage()
-  } catch (error) { toast(errorText(error), 'error'); await loadPage() }
+    const feedback = await requestWebhookTest(`/webhooks/${hook.id}/test`, hook.name)
+    hookTestResults.value[hook.id] = feedback
+    toast(feedback.result?.message || feedback.error, feedback.result?.success ? 'success' : 'error')
+    try {
+      const value = await api<Webhook[] | PageResult<Webhook>>('/webhooks')
+      hooks.value = Array.isArray(value) ? value : value.items || []
+    } catch (error) {
+      hookTestResults.value[hook.id]!.refresh_error = errorText(error)
+    }
+  }
   finally { testingHook.value = null }
+}
+async function testWebhookForm() {
+  if (dialogBusy.value || testingHook.value !== null) return
+  dialogError.value = ''
+  if (!validateWebhookForm()) return
+  dialogBusy.value = true
+  testingHookForm.value = true
+  testedHookForm.value = JSON.stringify(hookForm.value)
+  try {
+    hookFormTestResult.value = await requestWebhookTest('/webhooks/test', hookForm.value.name, testedHookForm.value)
+  } finally {
+    dialogBusy.value = false
+    testingHookForm.value = false
+  }
 }
 async function toggleWebhook(hook: Webhook) {
   if (savingHook.value) return
@@ -413,8 +456,19 @@ onBeforeUnmount(() => {
         </section>
 
         <template v-if="view === 'webhooks'">
-          <div class="info-banner"><BellRing :size="21" /><div><strong>一条告警，多处送达</strong><p>安全告警将由主控发送到所有已启用的通知地址。支持飞书、企业微信和通用 JSON；点击“发送测试”会立即发送一条测试消息。</p></div></div>
-          <div class="webhook-grid"><article v-for="hook in hooks" :key="hook.id" class="webhook-card"><div class="webhook-card-top"><span class="webhook-icon"><WebhookIcon :size="24" /></span><span class="badge" :class="hook.enabled ? 'success' : 'neutral'"><span class="status-dot"></span>{{ hook.enabled ? '已启用' : '已暂停' }}</span><div class="card-actions"><button class="icon-button" :aria-label="`编辑 ${hook.name}`" @click="editWebhook(hook)"><Pencil :size="16" /></button><button class="icon-button danger-text" :aria-label="`删除 ${hook.name}`" @click="confirmDelete('webhook', hook.id, hook.name)"><Trash2 :size="16" /></button></div></div><h2>{{ hook.name }}</h2><span class="webhook-format">{{ formatNames[hook.format] || hook.format }}</span><div class="endpoint-display"><Globe :size="16" /><span>{{ webhookHostname(hook.url) }}</span><span class="muted">/ ···</span></div><p class="endpoint-hint">完整地址可在编辑中查看</p><dl class="webhook-delivery"><div><dt>最近成功</dt><dd>{{ displayTime(hook.last_success_at) }}</dd></div><div><dt>等待投递</dt><dd>{{ hook.pending_count ?? 0 }} 条</dd></div></dl><div v-if="hook.last_error" class="delivery-error"><ShieldAlert :size="15" /><span>{{ hook.last_error }}</span></div><div class="webhook-card-footer"><button class="toggle-control" :aria-pressed="hook.enabled" :aria-label="hook.enabled ? '暂停通知' : '启用通知'" :disabled="loading" @click="toggleWebhook(hook)"><span class="toggle" :class="{ enabled: hook.enabled }"><span></span></span>{{ hook.enabled ? '通知已开启' : '通知已暂停' }}</button><button class="button secondary small" :disabled="testingHook !== null" @click="testWebhook(hook)"><LoaderCircle v-if="testingHook === hook.id" class="spin" :size="15" /><Send v-else :size="15" />发送测试</button></div></article><button v-if="hooks.length" class="add-webhook-card" @click="editWebhook()"><span><Plus :size="25" /></span><strong>添加通知地址</strong><p>连接更多通知渠道</p></button></div>
+          <div class="info-banner"><BellRing :size="21" /><div><strong>一条告警，多处送达</strong><p>主控将新告警发送到所有已启用的通知地址，正文包含机器 IP、主机名、时间、告警类型、检测目标、描述、变更前后值与事件 ID。暂停后停止自动告警投递，仍可手动发送测试。</p><p>飞书与 Lark 请选择“飞书 / Lark 机器人”，使用 msg_type / content.text 文本格式。测试后可在下方查看接收端响应与本次正文。</p></div></div>
+          <div class="webhook-grid">
+            <article v-for="hook in hooks" :key="hook.id" class="webhook-card">
+              <div class="webhook-card-top"><span class="webhook-icon"><WebhookIcon :size="24" /></span><span class="badge" :class="hook.enabled ? 'success' : 'neutral'"><span class="status-dot"></span>{{ hook.enabled ? '已启用' : '已暂停' }}</span><div class="card-actions"><button class="icon-button" :aria-label="`编辑 ${hook.name}`" :disabled="testingHook === hook.id" @click="editWebhook(hook)"><Pencil :size="16" /></button><button class="icon-button danger-text" :aria-label="`删除 ${hook.name}`" :disabled="testingHook === hook.id" @click="confirmDelete('webhook', hook.id, hook.name)"><Trash2 :size="16" /></button></div></div>
+              <h2>{{ hook.name }}</h2><span class="webhook-format">{{ formatNames[hook.format] || hook.format }}</span>
+              <div class="endpoint-display"><Globe :size="16" /><span>{{ webhookHostname(hook.url) }}</span><span class="muted">/ ···</span></div><p class="endpoint-hint">完整地址可在编辑中查看</p>
+              <dl class="webhook-delivery"><div><dt>最近成功</dt><dd>{{ displayTime(hook.last_success_at) }}</dd></div><div><dt>等待投递</dt><dd>{{ hook.pending_count ?? 0 }} 条</dd></div></dl>
+              <div v-if="hook.last_error" class="delivery-error"><ShieldAlert :size="15" /><span>{{ hook.last_error }}</span></div>
+              <WebhookTestFeedback v-if="hookTestResults[hook.id]" :feedback="hookTestResults[hook.id]!" />
+              <div class="webhook-card-footer"><button class="toggle-control" :aria-pressed="hook.enabled" :aria-label="hook.enabled ? '暂停通知' : '启用通知'" :disabled="loading || savingHook || testingHook !== null" @click="toggleWebhook(hook)"><span class="toggle" :class="{ enabled: hook.enabled }"><span></span></span>{{ hook.enabled ? '通知已开启' : '通知已暂停' }}</button><button class="button secondary small" :disabled="testingHook !== null || testingHookForm || savingHook" @click="testWebhook(hook)"><LoaderCircle v-if="testingHook === hook.id" class="spin" :size="15" /><Send v-else :size="15" />发送测试</button></div>
+            </article>
+            <button v-if="hooks.length" class="add-webhook-card" @click="editWebhook()"><span><Plus :size="25" /></span><strong>添加通知地址</strong><p>连接更多通知渠道</p></button>
+          </div>
           <section v-if="!hooks.length" class="panel empty-state webhook-empty"><LoaderCircle v-if="loading" :size="32" class="spin" /><WebhookIcon v-else :size="39" /><h3>{{ loading ? '正在加载通知配置' : '配置你的第一个通知地址' }}</h3><p>将文件变化与安全异常送达团队常用的通知渠道。</p><button v-if="!loading" class="button primary" @click="editWebhook()"><Plus :size="17" />添加通知地址</button></section>
         </template>
         <footer class="workspace-footer"><span><ShieldCheck :size="14" />安全中心</span><span>所有记录来自 Agent 实际上报</span></footer>
@@ -429,7 +483,15 @@ onBeforeUnmount(() => {
         <div v-if="dialogError" class="error-banner" role="alert"><ShieldAlert :size="17" />{{ dialogError }}</div>
         <template v-if="dialog === 'event' && activeEvent"><div class="event-detail-heading"><span class="event-type" :class="activeEvent.type"><ShieldAlert v-if="activeEvent.type === 'alert'" :size="17" /><LogIn v-else-if="activeEvent.type === 'ssh_login'" :size="17" /><Activity v-else :size="17" />{{ typeLabel(activeEvent.type) }}</span><span class="muted mono">#{{ activeEvent.id }}</span></div><h3 class="detail-event-title">{{ eventTitle(activeEvent) }}</h3><dl class="detail-grid"><div><dt>所属机器</dt><dd class="mono">{{ activeEvent.machine_ip }}</dd></div><div><dt>主机名</dt><dd>{{ activeEvent.host || '—' }}</dd></div><div><dt>发生时间</dt><dd>{{ displayTime(activeEvent.time) }}</dd></div><div><dt>接收时间</dt><dd>{{ displayTime(activeEvent.received_at) }}</dd></div><template v-if="activeEvent.type === 'alert'"><div><dt>检测模块</dt><dd>{{ moduleLabel(activeEvent.data) }}</dd></div><div><dt>告警类型</dt><dd>{{ alertKindLabel(activeEvent.data) }}</dd></div><div class="full"><dt>文件路径 / 检测目标</dt><dd class="path-value mono">{{ textField(activeEvent.data, 'target') }}</dd></div><div v-if="activeEvent.data.message" class="full"><dt>原始描述</dt><dd>{{ textField(activeEvent.data, 'message') }}</dd></div></template><template v-if="activeEvent.type === 'ssh_login'"><div><dt>登录来源 IP</dt><dd class="mono">{{ textField(activeEvent.data, 'source_ip') }}</dd></div><div><dt>登录用户</dt><dd>{{ textField(activeEvent.data, 'user') }}</dd></div><div><dt>终端</dt><dd>{{ textField(activeEvent.data, 'terminal') }}</dd></div><div><dt>登录方式</dt><dd>{{ textField(activeEvent.data, 'method') }}</dd></div></template></dl><div v-if="activeEvent.type === 'alert' && (activeEvent.data.before || activeEvent.data.after)" class="hash-comparison"><h4><Fingerprint :size="17" />变更内容 / MD5</h4><div><span><ArrowLeft :size="13" />变更前</span><code>{{ textField(activeEvent.data, 'before') }}</code></div><div><span><ArrowRight :size="13" />变更后</span><code>{{ textField(activeEvent.data, 'after') }}</code></div></div><div class="form-section-title"><Settings2 :size="17" />处理记录</div><label>处理状态<select v-model="eventStatus" :disabled="dialogBusy"><option value="open">待处理</option><option value="resolved">已处理</option></select></label><label>处理备注<textarea v-model="eventNotes" placeholder="记录排查结果、处理措施或跟进事项…" rows="3" maxlength="4000" :disabled="dialogBusy"></textarea></label><details class="raw-details"><summary>查看原始事件 JSON</summary><button type="button" class="text-button copy-json" @click="copyDetails"><Copy :size="14" />复制</button><pre>{{ jsonEvent }}</pre></details></template>
         <template v-if="dialog === 'machine'"><p class="modal-description">IP 是机器的唯一标识，别名与备注可帮助你快速识别用途。</p><label>机器 IP<input :value="selectedMachine?.ip" disabled class="mono" /></label><label>机器别名<input v-model="machineForm.alias" placeholder="例如：生产环境 · 应用服务器" maxlength="100" :disabled="dialogBusy" /></label><label>备注<textarea v-model="machineForm.notes" placeholder="用途、负责人或其他补充信息" rows="4" maxlength="4000" :disabled="dialogBusy"></textarea></label></template>
-        <template v-if="dialog === 'webhook'"><p class="modal-description">配置一个通知渠道。保存后，主控会将新告警发送到已启用的地址。</p><label>通知名称<input v-model="hookForm.name" placeholder="例如：运维安全告警群" required maxlength="100" :disabled="dialogBusy" /></label><label>消息格式<select v-model="hookForm.format" :disabled="dialogBusy"><option value="feishu">飞书机器人</option><option value="wecom">企业微信机器人</option><option value="generic">通用 Webhook（JSON）</option></select></label><label>Webhook URL<textarea v-model="hookForm.url" class="mono url-input" placeholder="https://…" required rows="3" maxlength="4096" :disabled="dialogBusy" spellcheck="false"></textarea><small>请输入完整的通知地址，包括所需的路径与参数。</small></label><label class="checkbox-label"><input v-model="hookForm.enabled" type="checkbox" :disabled="dialogBusy" /><span>启用这个通知地址<small>开启后接收新产生的安全告警。</small></span></label></template>
+        <template v-if="dialog === 'webhook'">
+          <p class="modal-description">保存后，主控会将新告警发送到已启用的地址。告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值与事件 ID。</p>
+          <label>通知名称<input v-model="hookForm.name" placeholder="例如：运维安全告警群" required maxlength="100" :disabled="dialogBusy" /></label>
+          <label>消息格式<select v-model="hookForm.format" :disabled="dialogBusy"><option value="feishu">飞书 / Lark 机器人</option><option value="wecom">企业微信机器人</option><option value="generic">通用 Webhook（JSON）</option></select><small>{{ hookFormatHint }}</small></label>
+          <label>Webhook URL<textarea v-model="hookForm.url" class="mono url-input" placeholder="https://…" required rows="3" maxlength="4096" :disabled="dialogBusy" spellcheck="false"></textarea><small>请输入完整的通知地址，包括所需的路径与参数。</small></label>
+          <label class="checkbox-label"><input v-model="hookForm.enabled" type="checkbox" :disabled="dialogBusy" /><span>启用这个通知地址<small>开启后接收新告警；暂停后停止自动投递，仍可手动测试。</small></span></label>
+          <div class="webhook-form-test"><button type="button" class="button secondary" :disabled="dialogBusy || testingHook !== null" @click="testWebhookForm"><LoaderCircle v-if="testingHookForm" class="spin" :size="16" /><Send v-else :size="16" />{{ testingHookForm ? '正在测试…' : '发送测试' }}</button><p>测试当前填写的配置，不保存更改。</p></div>
+          <WebhookTestFeedback v-if="hookFormTestResult" :feedback="hookFormTestResult" :stale="hookFormTestStale" />
+        </template>
         <template v-if="dialog === 'password'"><p class="modal-description">为管理员账号设置新的登录密码，更新成功后请重新登录。</p><label>当前密码<input v-model="passwordForm.current" type="password" autocomplete="current-password" required :disabled="dialogBusy" /></label><label>新密码<input v-model="passwordForm.next" type="password" autocomplete="new-password" required maxlength="72" placeholder="8–72 字节，建议使用字母、数字与符号" :disabled="dialogBusy" /></label><label>确认新密码<input v-model="passwordForm.confirm" type="password" autocomplete="new-password" required maxlength="72" :disabled="dialogBusy" /></label></template>
         <template v-if="dialog === 'delete' && deleteTarget"><div class="delete-icon"><Trash2 :size="27" /></div><p class="delete-message">确定删除 <strong>{{ deleteTarget.label }}</strong> 吗？</p><p class="muted delete-hint">{{ deleteTarget.kind === 'machine' ? '这会删除该机器和它的全部事件记录。Agent 再次上报后机器会重新出现，但已删除的历史记录无法恢复。' : deleteTarget.kind === 'event' ? '这条事件及处理备注将永久删除，无法恢复。' : '该通知地址将被移除，不再接收新告警。' }}</p></template>
       </div><div class="modal-footer"><button v-if="dialog === 'event' && activeEvent" type="button" class="button ghost danger-text delete-event-button" :disabled="dialogBusy" @click="confirmDelete('event', activeEvent.id, `事件 #${activeEvent.id}`)"><Trash2 :size="16" />删除记录</button><button type="button" class="button secondary" :disabled="dialogBusy" @click="closeDialog">取消</button><button type="submit" class="button" :class="dialog === 'delete' ? 'danger' : 'primary'" :disabled="dialogBusy"><LoaderCircle v-if="dialogBusy" class="spin" :size="16" /><span>{{ dialogBusy ? '正在处理…' : dialog === 'delete' ? '确认删除' : dialog === 'password' ? '更新密码' : '保存更改' }}</span></button></div></form>

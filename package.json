@@ -8,6 +8,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
+    "test:webhooks": "node --test tests/webhook-test.test.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 10111"
   },
   "dependencies": {

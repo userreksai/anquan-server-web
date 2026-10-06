@@ -68,7 +68,7 @@ pnpm dev
 - 文件告警：显示目标路径，完整展示变更前后值 / MD5；原始 JSON 可展开或复制。
 - 登录记录：来源 IP、用户、终端、登录方式与实际登录时间。
 - 处理记录：待处理 / 已处理、备注编辑与单条事件删除。
-- 通知配置：多个 URL 的新增、修改、删除、启停，飞书 / 企业微信 / 通用格式，测试发送与最近投递状态。
+- 通知配置：多个 URL 的新增、修改、删除、启停，飞书 / Lark、企业微信与通用格式；可测试已保存配置或编辑中的草稿，保留测试正文、HTTP 状态、业务码、耗时和错误详情。
 - Cookie 会话登录、退出、过期回到登录页；改密后重新登录。
 - 登录后每 15 秒刷新当前页与机器统计，保留已应用筛选、当前页码和未提交输入。切换到后台、打开编辑弹窗或已有请求执行时暂停轮询，回到前台立即刷新。
 - 在线机器显示绿色状态；超过主控返回的心跳阈值未收到上报，显示红色“异常离线”，概览同步显示异常离线数量。详情展示该机器的实际超时阈值。
@@ -80,6 +80,7 @@ pnpm dev
 
 ```sh
 pnpm typecheck
+pnpm test:webhooks
 pnpm build
 ```
 
@@ -100,7 +101,7 @@ docker run -d --name anquan-web --network anquan -p 10111:10111 anquan-server-we
 
 ## API 契约
 
-所有路径以 `/api` 为前缀；发送 JSON，使用同源 Cookie。分页响应为 `{items, total, page, page_size}`；错误响应为 `{message}`。
+所有路径以 `/api` 为前缀；发送 JSON，使用同源 Cookie。分页响应为 `{items, total, page, page_size}`；一般错误响应为 `{message}`，Webhook 投递测试错误返回下述完整测试结果。
 
 | 功能 | 请求 |
 | --- | --- |
@@ -121,5 +122,14 @@ docker run -d --name anquan-web --network anquan -p 10111:10111 anquan-server-we
 | 新增 / 编辑地址 | `POST /webhooks` / `PUT /webhooks/{id}`：`name,url,format,enabled` |
 | 删除地址 | `DELETE /webhooks/{id}` |
 | 立即测试发送 | `POST /webhooks/{id}/test` |
+| 测试当前表单，不保存 | `POST /webhooks/test`：`name,url,format,enabled` |
 
 事件类型为 `alert`、`ssh_login`、`scan_summary`。处理状态为 `open`、`resolved`。通知格式为 `feishu`、`wecom`、`generic`。新密码验证与主控一致，为 UTF-8 编码后 8–72 字节。
+
+飞书和 Lark 均选择 `feishu`，主控发送 `{"msg_type":"text","content":{"text":"告警正文"}}`。企业微信使用 `wecom`；`generic` 面向自建 JSON 接收服务。自动发送的新告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值和事件 ID。暂停配置会停止自动告警投递，手动测试仍可使用。
+
+两个测试接口均返回 `{message,success,text,format,http_status?,business_code?,duration_ms}`。`text` 是本次实际测试正文，`format` 是实际采用的格式；`http_status` 是接收端 HTTP 状态，未收到响应时省略；`business_code` 是接收端业务码，未返回时省略。投递成功响应 HTTP 200，投递失败响应 HTTP 502 并保留这些详情；表单校验失败等请求错误仍可能仅返回 `{message}`。
+
+前端仅在完整 JSON 契约通过校验、`success=true`、接收端 HTTP 为 2xx 且返回的业务码为整数 0 时显示“接口确认成功”。飞书 / Lark 和企业微信必须返回业务码 0；通用格式可不返回业务码。空响应、HTML 页面、旧版仅有 `{message}` 的响应和自相矛盾的成功状态均不能被判为成功。该结果表示接收接口应答，群内展示情况仍以接收平台为准。
+
+测试结果在当前页面持续显示，刷新通知列表失败不会覆盖投递结果。编辑表单内容后会提示重新测试；保存编辑或删除地址后清除原配置的测试结果。页面重新加载后会清空本次测试详情，主控保留最近投递时间与错误。
