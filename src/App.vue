@@ -55,7 +55,7 @@ const eventNotes = ref('')
 const eventStatus = ref<'open' | 'resolved'>('open')
 const machineForm = ref({ alias: '', notes: '' })
 const editingHookId = ref<number | null>(null)
-const hookForm = ref({ name: '', url: '', format: 'feishu' as Webhook['format'], enabled: true })
+const hookForm = ref({ name: '', url: '', format: 'feishu' as const, enabled: true })
 const testingHook = ref<number | null>(null)
 const testingHookForm = ref(false)
 const hookTestResults = ref<Record<number, TestFeedback>>({})
@@ -73,12 +73,7 @@ const refreshStatus = computed(() => loading.value ? '正在刷新数据' : page
 const isOnline = (machine: Machine) => machine.status ? machine.status === 'online' : machine.online
 const offlineAfter = (machine: Machine) => machine.offline_after_seconds ?? Math.max((machine.interval_seconds || 300) * 3, 120)
 const tabs = [{ value: '', label: '全部记录' }, { value: 'alert', label: '安全告警' }, { value: 'ssh_login', label: 'SSH 登录' }, { value: 'scan_summary', label: '巡检记录' }]
-const formatNames = { feishu: '飞书 / Lark 机器人', wecom: '企业微信机器人', generic: '通用 Webhook' }
-const hookFormatHint = computed(() => ({
-  feishu: '飞书和 Lark 使用相同格式：{"msg_type":"text","content":{"text":"告警正文"}}。',
-  wecom: '企业微信格式：{"msgtype":"text","text":{"content":"告警正文"}}。',
-  generic: '通用 JSON 适用于自建接收服务。Lark 机器人请选择“飞书 / Lark 机器人”。',
-}[hookForm.value.format]))
+const formatNames = { feishu: 'Lark 机器人', wecom: '企业微信机器人', generic: '通用 Webhook' }
 const displayTime = (value: string | undefined) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -251,7 +246,7 @@ function editMachine() {
 }
 function editWebhook(hook?: Webhook) {
   editingHookId.value = hook?.id ?? null
-  hookForm.value = { name: hook?.name || '', url: hook?.url || '', format: hook?.format || 'feishu', enabled: hook?.enabled ?? true }
+  hookForm.value = { name: hook?.name || '', url: hook?.url || '', format: 'feishu', enabled: hook?.enabled ?? true }
   hookFormTestResult.value = null
   testedHookForm.value = ''
   void openDialog('webhook')
@@ -458,7 +453,7 @@ onBeforeUnmount(() => {
 
         <AgentEncryption v-if="view === 'encryption'" />
         <template v-if="view === 'webhooks'">
-          <div class="info-banner"><BellRing :size="21" /><div><strong>一条告警，多处送达</strong><p>主控将新告警发送到所有已启用的通知地址，正文包含机器 IP、主机名、时间、告警类型、检测目标、描述、变更前后值与事件 ID。暂停后停止自动告警投递，仍可手动发送测试。</p><p>飞书与 Lark 请选择“飞书 / Lark 机器人”，使用 msg_type / content.text 文本格式。测试后可在下方查看接收端响应与本次正文。</p></div></div>
+          <div class="info-banner"><BellRing :size="21" /><div><strong>一条告警，多处送达</strong><p>主控将新告警发送到所有已启用的通知地址，正文包含机器 IP、主机名、时间、告警类型、检测目标、描述、变更前后值与事件 ID。暂停后停止自动告警投递，仍可手动发送测试。</p><p>消息格式固定为 Lark 机器人，请填写 Lark 机器人的 Webhook 地址。测试后可在下方查看接收端响应与本次正文。</p></div></div>
           <div class="webhook-grid">
             <article v-for="hook in hooks" :key="hook.id" class="webhook-card">
               <div class="webhook-card-top"><span class="webhook-icon"><WebhookIcon :size="24" /></span><span class="badge" :class="hook.enabled ? 'success' : 'neutral'"><span class="status-dot"></span>{{ hook.enabled ? '已启用' : '已暂停' }}</span><div class="card-actions"><button class="icon-button" :aria-label="`编辑 ${hook.name}`" :disabled="testingHook === hook.id" @click="editWebhook(hook)"><Pencil :size="16" /></button><button class="icon-button danger-text" :aria-label="`删除 ${hook.name}`" :disabled="testingHook === hook.id" @click="confirmDelete('webhook', hook.id, hook.name)"><Trash2 :size="16" /></button></div></div>
@@ -488,7 +483,7 @@ onBeforeUnmount(() => {
         <template v-if="dialog === 'webhook'">
           <p class="modal-description">保存后，主控会将新告警发送到已启用的地址。告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值与事件 ID。</p>
           <label>通知名称<input v-model="hookForm.name" placeholder="例如：运维安全告警群" required maxlength="100" :disabled="dialogBusy" /></label>
-          <label>消息格式<select v-model="hookForm.format" :disabled="dialogBusy"><option value="feishu">飞书 / Lark 机器人</option><option value="wecom">企业微信机器人</option><option value="generic">通用 Webhook（JSON）</option></select><small>{{ hookFormatHint }}</small></label>
+          <label>消息格式<select v-model="hookForm.format" :disabled="dialogBusy"><option value="feishu">Lark 机器人</option></select><small>通知将以 Lark 机器人文本消息发送。</small></label>
           <label>Webhook URL<textarea v-model="hookForm.url" class="mono url-input" placeholder="https://…" required rows="3" maxlength="4096" :disabled="dialogBusy" spellcheck="false"></textarea><small>请输入完整的通知地址，包括所需的路径与参数。</small></label>
           <label class="checkbox-label"><input v-model="hookForm.enabled" type="checkbox" :disabled="dialogBusy" /><span>启用这个通知地址<small>开启后接收新告警；暂停后停止自动投递，仍可手动测试。</small></span></label>
           <div class="webhook-form-test"><button type="button" class="button secondary" :disabled="dialogBusy || testingHook !== null" @click="testWebhookForm"><LoaderCircle v-if="testingHookForm" class="spin" :size="16" /><Send v-else :size="16" />{{ testingHookForm ? '正在测试…' : '发送测试' }}</button><p>测试当前填写的配置，不保存更改。</p></div>

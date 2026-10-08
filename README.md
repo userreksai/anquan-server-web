@@ -76,7 +76,7 @@ pnpm dev
 - 文件告警：显示目标路径，完整展示变更前后值 / MD5；原始 JSON 可展开或复制。
 - 登录记录：来源 IP、用户、终端、登录方式与实际登录时间。
 - 处理记录：待处理 / 已处理、备注编辑与单条事件删除。
-- 通知配置：多个 URL 的新增、修改、删除、启停，飞书 / Lark、企业微信与通用格式；可测试已保存配置或编辑中的草稿，保留测试正文、HTTP 状态、业务码、耗时和错误详情。
+- 通知配置：多个 URL 的新增、修改、删除、启停，新增与编辑时消息格式仅支持 Lark 机器人；可测试已保存配置或编辑中的草稿，保留测试正文、HTTP 状态、业务码、耗时和错误详情。
 - Cookie 会话登录、退出、过期回到登录页；改密后重新登录。
 - 登录后每 15 秒刷新当前页与机器统计，保留已应用筛选、当前页码和未提交输入。切换到后台、打开编辑弹窗或已有请求执行时暂停轮询，回到前台立即刷新。
 - 在线机器显示绿色状态；超过主控返回的心跳阈值未收到上报，显示红色“异常离线”，概览同步显示异常离线数量。详情展示该机器的实际超时阈值。
@@ -132,9 +132,9 @@ docker run -d --name anquan-web --network anquan -p 10111:10111 anquan-server-we
 | 立即测试发送 | `POST /webhooks/{id}/test` |
 | 测试当前表单，不保存 | `POST /webhooks/test`：`name,url,format,enabled` |
 
-事件类型为 `alert`、`ssh_login`、`scan_summary`。处理状态为 `open`、`resolved`。通知格式为 `feishu`、`wecom`、`generic`。新密码验证与主控一致，为 UTF-8 编码后 8–72 字节。
+事件类型为 `alert`、`ssh_login`、`scan_summary`。处理状态为 `open`、`resolved`。前端新增、编辑与草稿测试的通知格式固定为 `feishu`（Lark 机器人）；接口仍兼容历史配置的 `wecom`、`generic`。新密码验证与主控一致，为 UTF-8 编码后 8–72 字节。
 
-飞书和 Lark 均选择 `feishu`，主控发送 `{"msg_type":"text","content":{"text":"告警正文"}}`。企业微信使用 `wecom`；`generic` 面向自建 JSON 接收服务。自动发送的新告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值和事件 ID。暂停配置会停止自动告警投递，手动测试仍可使用。
+Lark 机器人沿用接口值 `feishu`，主控发送 `{"msg_type":"text","content":{"text":"告警正文"}}`。已有其他格式的配置仍按原格式展示、启停与测试；打开编辑后，表单使用 Lark 格式，保存时更新为 `feishu`，请同时确认 URL 为 Lark 机器人的 Webhook 地址。自动发送的新告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值和事件 ID。暂停配置会停止自动告警投递，手动测试仍可使用。
 
 两个测试接口均返回 `{message,success,text,format,http_status?,business_code?,duration_ms}`。`text` 是本次实际测试正文，`format` 是实际采用的格式；`http_status` 是接收端 HTTP 状态，未收到响应时省略；`business_code` 是接收端业务码，未返回时省略。投递成功响应 HTTP 200，投递失败响应 HTTP 502 并保留这些详情；表单校验失败等请求错误仍可能仅返回 `{message}`。
 
