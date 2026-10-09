@@ -40,6 +40,13 @@ ProcessMonitoring:
   #   whitelist:
   #     - /usr/sbin/sshd -D
 
+history:
+  enabled: true             # 补传已有命令，此后每秒增量上传；需配套支持确认应答的 Master
+  path: /var/log/history.log
+  timezone: Local           # 与脚本 date 使用的节点时区一致
+  poll_interval_ms: 1000    # 独立于下方文件巡检间隔
+  max_records: 100          # 每批上限；有积压时连续分批补传
+
 login:
   enabled: true
   source: journal            # journal（推荐）、authlog、jsonl、wtmp

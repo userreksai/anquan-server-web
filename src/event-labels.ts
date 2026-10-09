@@ -6,6 +6,7 @@ const moduleNames: Record<string, string> = {
   processes: '进程监控',
   process: '进程监控',
   login: '登录采集',
+  history: '命令采集',
   state: '基线状态',
 }
 
@@ -25,6 +26,7 @@ export function alertKindLabel(data: Record<string, unknown>): string {
   const isProcess = ['processes', 'process'].includes(module)
   const isFile = ['files', 'file', 'md5', 'existence'].includes(module)
   const labels: Record<string, string> = {
+    parse_error: '命令记录格式异常',
     collection_error: '采集异常',
     inspection_error: '文件检查失败',
     not_found: '未找到配置的目标文件',

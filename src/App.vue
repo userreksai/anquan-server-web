@@ -7,6 +7,7 @@ import Pagination from './components/Pagination.vue'
 import AgentEncryption from './components/AgentEncryption.vue'
 import WebhookTestFeedback from './components/WebhookTestFeedback.vue'
 import { requestWebhookTest } from './webhook-test'
+import './history.css'
 import type { Machine, Overview, PageResult, SecurityEvent, Webhook, WebhookTestFeedback as TestFeedback } from './types'
 
 type View = 'overview' | 'machines' | 'events' | 'webhooks' | 'encryption'
@@ -69,10 +70,10 @@ let lastFocused: HTMLElement | null = null
 let loadId = 0
 const title = computed(() => selectedMachine.value ? (selectedMachine.value.alias || selectedMachine.value.ip) : ({ overview: '安全概览', machines: '机器管理', events: '安全事件', webhooks: '通知配置', encryption: 'Age 配置加密' }[view.value]))
 const offlineMachines = computed(() => overview.value ? Math.max(0, overview.value.machines - overview.value.online_machines) : 0)
-const refreshStatus = computed(() => loading.value ? '正在刷新数据' : pageError.value ? '刷新失败，将自动重试' : !pageVisible.value || dialog.value || dialogBusy.value || savingHook.value || testingHook.value !== null ? '自动刷新已暂停' : '每 15 秒自动刷新')
+const refreshStatus = computed(() => loading.value ? '正在刷新数据' : pageError.value ? '刷新失败，将自动重试' : !pageVisible.value || dialog.value || dialogBusy.value || savingHook.value || testingHook.value !== null ? '自动刷新已暂停' : eventType.value === 'command_history' ? '每 2 秒自动刷新' : '每 15 秒自动刷新')
 const isOnline = (machine: Machine) => machine.status ? machine.status === 'online' : machine.online
 const offlineAfter = (machine: Machine) => machine.offline_after_seconds ?? Math.max((machine.interval_seconds || 300) * 3, 120)
-const tabs = [{ value: '', label: '全部记录' }, { value: 'alert', label: '安全告警' }, { value: 'ssh_login', label: 'SSH 登录' }, { value: 'scan_summary', label: '巡检记录' }]
+const tabs = [{ value: '', label: '全部记录' }, { value: 'alert', label: '安全告警' }, { value: 'ssh_login', label: 'SSH 登录' }, { value: 'command_history', label: '操作命令' }, { value: 'scan_summary', label: '巡检记录' }]
 const formatNames = { feishu: 'Lark 机器人', wecom: '企业微信机器人', generic: '通用 Webhook' }
 const displayTime = (value: string | undefined) => {
   if (!value) return '—'
@@ -80,17 +81,18 @@ const displayTime = (value: string | undefined) => {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 const shortTime = (value: string) => new Date(value).toLocaleTimeString('zh-CN', { hour12: false })
-const typeLabel = (type: string) => ({ alert: '安全告警', ssh_login: 'SSH 登录', scan_summary: '巡检记录' }[type] || type)
+const typeLabel = (type: string) => ({ alert: '安全告警', ssh_login: 'SSH 登录', command_history: '操作命令', scan_summary: '巡检记录' }[type] || type)
 const textField = (data: Record<string, unknown>, key: string) => {
   const value = data?.[key]
   return value === undefined || value === null || value === '' ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 const eventTitle = (event: SecurityEvent) => {
+	if (event.type === 'command_history') return `${textField(event.data, 'user')} 执行命令`
   if (event.type === 'ssh_login') return `${textField(event.data, 'user')} 登录系统`
   if (event.type === 'scan_summary') return event.data.collection_success === false ? '巡检采集异常' : '机器安全巡检'
   return alertTitle(event.data)
 }
-const eventSubtitle = (event: SecurityEvent) => event.type === 'ssh_login' ? `来源 ${textField(event.data, 'source_ip')} · 终端 ${textField(event.data, 'terminal')}` : event.type === 'alert' ? textField(event.data, 'target') : `文件 ${textField(event.data, 'files')} · 进程 ${textField(event.data, 'processes')}`
+const eventSubtitle = (event: SecurityEvent) => event.type === 'command_history' ? `${textField(event.data, 'terminal')} · ${textField(event.data, 'command')}` : event.type === 'ssh_login' ? `来源 ${textField(event.data, 'source_ip')} · 终端 ${textField(event.data, 'terminal')}` : event.type === 'alert' ? textField(event.data, 'target') : `文件 ${textField(event.data, 'files')} · 进程 ${textField(event.data, 'processes')}`
 const jsonEvent = computed(() => JSON.stringify(activeEvent.value, null, 2))
 const webhookHostname = (url: string) => { try { return new URL(url).hostname } catch { return '地址无效' } }
 const stats = computed(() => [
@@ -351,9 +353,9 @@ function visibilityChanged() {
   pageVisible.value = !document.hidden
   if (pageVisible.value) refreshAutomatically()
 }
-watch(authenticated, (loggedIn) => {
+watch([authenticated, eventType], ([loggedIn]) => {
   clearInterval(refreshTimer)
-  refreshTimer = loggedIn ? setInterval(refreshAutomatically, 15_000) : undefined
+  refreshTimer = loggedIn ? setInterval(refreshAutomatically, eventType.value === 'command_history' ? 2_000 : 15_000) : undefined
 })
 onMounted(async () => {
   window.addEventListener('auth-expired', expired)
@@ -453,7 +455,7 @@ onBeforeUnmount(() => {
 
         <AgentEncryption v-if="view === 'encryption'" />
         <template v-if="view === 'webhooks'">
-          <div class="info-banner"><BellRing :size="21" /><div><strong>一条告警，多处送达</strong><p>主控将新告警发送到所有已启用的通知地址，正文包含机器 IP、主机名、时间、告警类型、检测目标、描述、变更前后值与事件 ID。暂停后停止自动告警投递，仍可手动发送测试。</p><p>消息格式固定为 Lark 机器人，请填写 Lark 机器人的 Webhook 地址。测试后可在下方查看接收端响应与本次正文。</p></div></div>
+          <div class="info-banner"><BellRing :size="21" /><div><strong>安全告警与 SSH 登录通知</strong><p>主控将新告警和新入库的 SSH 登录发送到所有已启用的通知地址。告警保留检测目标与变更前后值；登录通知包含机器 IP、主机名、用户、来源 IP、终端、登录方式、登录时间与事件 ID。暂停后停止自动投递，仍可手动发送测试。</p><p>消息格式固定为 Lark 机器人，请填写 Lark 机器人的 Webhook 地址。测试后可在下方查看接收端响应与本次正文。</p></div></div>
           <div class="webhook-grid">
             <article v-for="hook in hooks" :key="hook.id" class="webhook-card">
               <div class="webhook-card-top"><span class="webhook-icon"><WebhookIcon :size="24" /></span><span class="badge" :class="hook.enabled ? 'success' : 'neutral'"><span class="status-dot"></span>{{ hook.enabled ? '已启用' : '已暂停' }}</span><div class="card-actions"><button class="icon-button" :aria-label="`编辑 ${hook.name}`" :disabled="testingHook === hook.id" @click="editWebhook(hook)"><Pencil :size="16" /></button><button class="icon-button danger-text" :aria-label="`删除 ${hook.name}`" :disabled="testingHook === hook.id" @click="confirmDelete('webhook', hook.id, hook.name)"><Trash2 :size="16" /></button></div></div>
@@ -466,7 +468,7 @@ onBeforeUnmount(() => {
             </article>
             <button v-if="hooks.length" class="add-webhook-card" @click="editWebhook()"><span><Plus :size="25" /></span><strong>添加通知地址</strong><p>连接更多通知渠道</p></button>
           </div>
-          <section v-if="!hooks.length" class="panel empty-state webhook-empty"><LoaderCircle v-if="loading" :size="32" class="spin" /><WebhookIcon v-else :size="39" /><h3>{{ loading ? '正在加载通知配置' : '配置你的第一个通知地址' }}</h3><p>将文件变化与安全异常送达团队常用的通知渠道。</p><button v-if="!loading" class="button primary" @click="editWebhook()"><Plus :size="17" />添加通知地址</button></section>
+          <section v-if="!hooks.length" class="panel empty-state webhook-empty"><LoaderCircle v-if="loading" :size="32" class="spin" /><WebhookIcon v-else :size="39" /><h3>{{ loading ? '正在加载通知配置' : '配置你的第一个通知地址' }}</h3><p>将文件变化、安全异常和 SSH 登录送达团队常用的通知渠道。</p><button v-if="!loading" class="button primary" @click="editWebhook()"><Plus :size="17" />添加通知地址</button></section>
         </template>
         <footer class="workspace-footer"><span><ShieldCheck :size="14" />安全中心</span><span>所有记录来自 Agent 实际上报</span></footer>
       </main>
@@ -478,19 +480,19 @@ onBeforeUnmount(() => {
   <Teleport to="body"><div v-if="dialog && authenticated" class="modal-backdrop" @click.self="closeDialog"><section ref="modalRef" class="modal" :class="{ 'event-modal': dialog === 'event', 'confirm-modal': dialog === 'delete' }" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1" @keydown="dialogKeydown"><div class="modal-header"><div><span class="eyebrow">{{ dialog === 'event' ? 'EVENT DETAILS' : dialog === 'delete' ? 'CONFIRM DELETION' : 'SETTINGS' }}</span><h2 id="dialog-title">{{ dialog === 'event' ? '事件详情' : dialog === 'machine' ? '编辑机器信息' : dialog === 'webhook' ? editingHookId === null ? '添加通知地址' : '编辑通知地址' : dialog === 'password' ? '修改登录密码' : '确认删除' }}</h2></div><button class="icon-button" aria-label="关闭对话框" :disabled="dialogBusy" @click="closeDialog"><X :size="20" /></button></div>
       <form @submit.prevent="saveDialog"><div class="modal-body">
         <div v-if="dialogError" class="error-banner" role="alert"><ShieldAlert :size="17" />{{ dialogError }}</div>
-        <template v-if="dialog === 'event' && activeEvent"><div class="event-detail-heading"><span class="event-type" :class="activeEvent.type"><ShieldAlert v-if="activeEvent.type === 'alert'" :size="17" /><LogIn v-else-if="activeEvent.type === 'ssh_login'" :size="17" /><Activity v-else :size="17" />{{ typeLabel(activeEvent.type) }}</span><span class="muted mono">#{{ activeEvent.id }}</span></div><h3 class="detail-event-title">{{ eventTitle(activeEvent) }}</h3><dl class="detail-grid"><div><dt>所属机器</dt><dd class="mono">{{ activeEvent.machine_ip }}</dd></div><div><dt>主机名</dt><dd>{{ activeEvent.host || '—' }}</dd></div><div><dt>发生时间</dt><dd>{{ displayTime(activeEvent.time) }}</dd></div><div><dt>接收时间</dt><dd>{{ displayTime(activeEvent.received_at) }}</dd></div><template v-if="activeEvent.type === 'alert'"><div><dt>检测模块</dt><dd>{{ moduleLabel(activeEvent.data) }}</dd></div><div><dt>告警类型</dt><dd>{{ alertKindLabel(activeEvent.data) }}</dd></div><div class="full"><dt>文件路径 / 检测目标</dt><dd class="path-value mono">{{ textField(activeEvent.data, 'target') }}</dd></div><div v-if="activeEvent.data.message" class="full"><dt>原始描述</dt><dd>{{ textField(activeEvent.data, 'message') }}</dd></div></template><template v-if="activeEvent.type === 'ssh_login'"><div><dt>登录来源 IP</dt><dd class="mono">{{ textField(activeEvent.data, 'source_ip') }}</dd></div><div><dt>登录用户</dt><dd>{{ textField(activeEvent.data, 'user') }}</dd></div><div><dt>终端</dt><dd>{{ textField(activeEvent.data, 'terminal') }}</dd></div><div><dt>登录方式</dt><dd>{{ textField(activeEvent.data, 'method') }}</dd></div></template></dl><div v-if="activeEvent.type === 'alert' && (activeEvent.data.before || activeEvent.data.after)" class="hash-comparison"><h4><Fingerprint :size="17" />变更内容 / MD5</h4><div><span><ArrowLeft :size="13" />变更前</span><code>{{ textField(activeEvent.data, 'before') }}</code></div><div><span><ArrowRight :size="13" />变更后</span><code>{{ textField(activeEvent.data, 'after') }}</code></div></div><div class="form-section-title"><Settings2 :size="17" />处理记录</div><label>处理状态<select v-model="eventStatus" :disabled="dialogBusy"><option value="open">待处理</option><option value="resolved">已处理</option></select></label><label>处理备注<textarea v-model="eventNotes" placeholder="记录排查结果、处理措施或跟进事项…" rows="3" maxlength="4000" :disabled="dialogBusy"></textarea></label><details class="raw-details"><summary>查看原始事件 JSON</summary><button type="button" class="text-button copy-json" @click="copyDetails"><Copy :size="14" />复制</button><pre>{{ jsonEvent }}</pre></details></template>
+        <template v-if="dialog === 'event' && activeEvent"><div class="event-detail-heading"><span class="event-type" :class="activeEvent.type"><ShieldAlert v-if="activeEvent.type === 'alert'" :size="17" /><LogIn v-else-if="activeEvent.type === 'ssh_login'" :size="17" /><Activity v-else :size="17" />{{ typeLabel(activeEvent.type) }}</span><span class="muted mono">#{{ activeEvent.id }}</span></div><h3 class="detail-event-title">{{ eventTitle(activeEvent) }}</h3><dl class="detail-grid"><div><dt>所属机器</dt><dd class="mono">{{ activeEvent.machine_ip }}</dd></div><div><dt>主机名</dt><dd>{{ activeEvent.host || '—' }}</dd></div><div><dt>发生时间</dt><dd>{{ displayTime(activeEvent.time) }}</dd></div><div><dt>接收时间</dt><dd>{{ displayTime(activeEvent.received_at) }}</dd></div><template v-if="activeEvent.type === 'alert'"><div><dt>检测模块</dt><dd>{{ moduleLabel(activeEvent.data) }}</dd></div><div><dt>告警类型</dt><dd>{{ alertKindLabel(activeEvent.data) }}</dd></div><div class="full"><dt>文件路径 / 检测目标</dt><dd class="path-value mono">{{ textField(activeEvent.data, 'target') }}</dd></div><div v-if="activeEvent.data.message" class="full"><dt>原始描述</dt><dd>{{ textField(activeEvent.data, 'message') }}</dd></div></template><template v-if="activeEvent.type === 'ssh_login'"><div><dt>登录来源 IP</dt><dd class="mono">{{ textField(activeEvent.data, 'source_ip') }}</dd></div><div><dt>登录用户</dt><dd>{{ textField(activeEvent.data, 'user') }}</dd></div><div><dt>终端</dt><dd>{{ textField(activeEvent.data, 'terminal') }}</dd></div><div><dt>登录方式</dt><dd>{{ textField(activeEvent.data, 'method') }}</dd></div></template></dl><section v-if="activeEvent.type === 'command_history'" class="command-detail"><dl class="detail-grid"><div><dt>执行用户</dt><dd>{{ textField(activeEvent.data, 'user') }}</dd></div><div><dt>终端</dt><dd class="mono">{{ textField(activeEvent.data, 'terminal') }}</dd></div><div class="full"><dt>来源日志</dt><dd class="mono">{{ textField(activeEvent.data, 'path') }}</dd></div></dl><h4>完整命令</h4><pre>{{ textField(activeEvent.data, 'command') }}</pre></section><div v-if="activeEvent.type === 'alert' && (activeEvent.data.before || activeEvent.data.after)" class="hash-comparison"><h4><Fingerprint :size="17" />变更内容 / MD5</h4><div><span><ArrowLeft :size="13" />变更前</span><code>{{ textField(activeEvent.data, 'before') }}</code></div><div><span><ArrowRight :size="13" />变更后</span><code>{{ textField(activeEvent.data, 'after') }}</code></div></div><div class="form-section-title"><Settings2 :size="17" />处理记录</div><label>处理状态<select v-model="eventStatus" :disabled="dialogBusy"><option value="open">待处理</option><option value="resolved">已处理</option></select></label><label>处理备注<textarea v-model="eventNotes" placeholder="记录排查结果、处理措施或跟进事项…" rows="3" maxlength="4000" :disabled="dialogBusy"></textarea></label><details class="raw-details"><summary>查看原始事件 JSON</summary><button type="button" class="text-button copy-json" @click="copyDetails"><Copy :size="14" />复制</button><pre>{{ jsonEvent }}</pre></details></template>
         <template v-if="dialog === 'machine'"><p class="modal-description">IP 是机器的唯一标识，别名与备注可帮助你快速识别用途。</p><label>机器 IP<input :value="selectedMachine?.ip" disabled class="mono" /></label><label>机器别名<input v-model="machineForm.alias" placeholder="例如：生产环境 · 应用服务器" maxlength="100" :disabled="dialogBusy" /></label><label>备注<textarea v-model="machineForm.notes" placeholder="用途、负责人或其他补充信息" rows="4" maxlength="4000" :disabled="dialogBusy"></textarea></label></template>
         <template v-if="dialog === 'webhook'">
-          <p class="modal-description">保存后，主控会将新告警发送到已启用的地址。告警正文包含机器 IP、主机名、时间、类型、目标、描述、变更前后值与事件 ID。</p>
+          <p class="modal-description">保存后，主控将新告警和新入库的 SSH 登录发送到已启用的地址。登录通知包含机器、用户、来源 IP、终端、登录方式和登录时间。</p>
           <label>通知名称<input v-model="hookForm.name" placeholder="例如：运维安全告警群" required maxlength="100" :disabled="dialogBusy" /></label>
           <label>消息格式<select v-model="hookForm.format" :disabled="dialogBusy"><option value="feishu">Lark 机器人</option></select><small>通知将以 Lark 机器人文本消息发送。</small></label>
           <label>Webhook URL<textarea v-model="hookForm.url" class="mono url-input" placeholder="https://…" required rows="3" maxlength="4096" :disabled="dialogBusy" spellcheck="false"></textarea><small>请输入完整的通知地址，包括所需的路径与参数。</small></label>
-          <label class="checkbox-label"><input v-model="hookForm.enabled" type="checkbox" :disabled="dialogBusy" /><span>启用这个通知地址<small>开启后接收新告警；暂停后停止自动投递，仍可手动测试。</small></span></label>
+          <label class="checkbox-label"><input v-model="hookForm.enabled" type="checkbox" :disabled="dialogBusy" /><span>启用这个通知地址<small>开启后接收新告警和 SSH 登录；暂停后停止自动投递，仍可手动测试。</small></span></label>
           <div class="webhook-form-test"><button type="button" class="button secondary" :disabled="dialogBusy || testingHook !== null" @click="testWebhookForm"><LoaderCircle v-if="testingHookForm" class="spin" :size="16" /><Send v-else :size="16" />{{ testingHookForm ? '正在测试…' : '发送测试' }}</button><p>测试当前填写的配置，不保存更改。</p></div>
           <WebhookTestFeedback v-if="hookFormTestResult" :feedback="hookFormTestResult" :stale="hookFormTestStale" />
         </template>
         <template v-if="dialog === 'password'"><p class="modal-description">为管理员账号设置新的登录密码，更新成功后请重新登录。</p><label>当前密码<input v-model="passwordForm.current" type="password" autocomplete="current-password" required :disabled="dialogBusy" /></label><label>新密码<input v-model="passwordForm.next" type="password" autocomplete="new-password" required maxlength="72" placeholder="8–72 字节，建议使用字母、数字与符号" :disabled="dialogBusy" /></label><label>确认新密码<input v-model="passwordForm.confirm" type="password" autocomplete="new-password" required maxlength="72" :disabled="dialogBusy" /></label></template>
-        <template v-if="dialog === 'delete' && deleteTarget"><div class="delete-icon"><Trash2 :size="27" /></div><p class="delete-message">确定删除 <strong>{{ deleteTarget.label }}</strong> 吗？</p><p class="muted delete-hint">{{ deleteTarget.kind === 'machine' ? '这会删除该机器和它的全部事件记录。Agent 再次上报后机器会重新出现，但已删除的历史记录无法恢复。' : deleteTarget.kind === 'event' ? '这条事件及处理备注将永久删除，无法恢复。' : '该通知地址将被移除，不再接收新告警。' }}</p></template>
+        <template v-if="dialog === 'delete' && deleteTarget"><div class="delete-icon"><Trash2 :size="27" /></div><p class="delete-message">确定删除 <strong>{{ deleteTarget.label }}</strong> 吗？</p><p class="muted delete-hint">{{ deleteTarget.kind === 'machine' ? '这会删除该机器和它的全部事件记录。Agent 再次上报后机器会重新出现，但已删除的历史记录无法恢复。' : deleteTarget.kind === 'event' ? '这条事件及处理备注将永久删除，无法恢复。' : '该通知地址将被移除，不再接收告警和 SSH 登录通知。' }}</p></template>
       </div><div class="modal-footer"><button v-if="dialog === 'event' && activeEvent" type="button" class="button ghost danger-text delete-event-button" :disabled="dialogBusy" @click="confirmDelete('event', activeEvent.id, `事件 #${activeEvent.id}`)"><Trash2 :size="16" />删除记录</button><button type="button" class="button secondary" :disabled="dialogBusy" @click="closeDialog">取消</button><button type="submit" class="button" :class="dialog === 'delete' ? 'danger' : 'primary'" :disabled="dialogBusy"><LoaderCircle v-if="dialogBusy" class="spin" :size="16" /><span>{{ dialogBusy ? '正在处理…' : dialog === 'delete' ? '确认删除' : dialog === 'password' ? '更新密码' : '保存更改' }}</span></button></div></form>
     </section></div></Teleport>
 </template>
