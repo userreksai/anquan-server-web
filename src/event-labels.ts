@@ -8,6 +8,7 @@ const moduleNames: Record<string, string> = {
   login: '登录采集',
   history: '命令采集',
   state: '基线状态',
+  machine: '机器状态',
 }
 
 function value(data: Record<string, unknown>, key: string): string {
@@ -26,6 +27,7 @@ export function alertKindLabel(data: Record<string, unknown>): string {
   const isProcess = ['processes', 'process'].includes(module)
   const isFile = ['files', 'file', 'md5', 'existence'].includes(module)
   const labels: Record<string, string> = {
+    abnormal_offline: '机器异常离线',
     parse_error: '命令记录格式异常',
     collection_error: '采集异常',
     inspection_error: '文件检查失败',
@@ -46,6 +48,7 @@ export function alertTitle(data: Record<string, unknown>): string {
   const module = value(data, 'module')
   const kind = value(data, 'kind')
   const message = value(data, 'message')
+  if (module === 'machine' && kind === 'abnormal_offline') return '机器异常离线'
   // Type fields remain reliable when agent/system error messages contain English details.
   if (kind === 'collection_error' || kind === 'inspection_error') return alertKindLabel(data)
   if (['processes', 'process'].includes(module)) {
