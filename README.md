@@ -4,9 +4,11 @@
 
 管理设置新增“Age 配置加密”。明文区默认填入带中文解释的节点 YAML，包含文件、进程、SSH 登录、上报地址和调度设置。请按每台节点修改路径和 `agent_ip`，默认示例不是通用生产配置。
 
-页面不显示或要求填写公钥、私钥；后端和 Agent 代码内置固定配套密钥。编辑 YAML，点击加密即可复制密文或下载 `config.age`，放到 Agent 可执行文件旁边。输入变更会清除旧密文，避免下载过时配置。明文不写入浏览器持久存储，离开页面会清空编辑状态。
+页面不显示或要求填写公钥、私钥；后端和 Agent 代码内置固定配套密钥。编辑 YAML，点击加密即可复制密文或下载 `config.age`，放到 Agent 可执行文件旁边。输入变更会清除旧密文，避免下载过时配置。
 
-依赖新版 Master 的 `GET/POST /api/settings/agent-encryption` 接口和新版 Agent 的外置配置支持。生产管理页面请通过 HTTPS 访问。更新配置无需重新编译 Agent；下次启动或常驻服务重启读取新配置。二进制只内置解密私钥，无法保证对节点 root 保密。
+点击“存储模板”将当前 YAML 原文保存到 Master 数据库，并保留注释、缩进和换行。“恢复示例”每次重新读取服务器上最新保存的模板；打开页面也优先载入该模板。跨浏览器、跨设备及服务重启后可继续使用。尚未保存时回退到内置示例，内置 `setup.prom` 使用固定的 `/var/lib/node_exporter/textfile_collector/process_monitor.prom`。未点击存储的编辑仅保留在当前页面，加密操作不会更新模板。保存失败会显示错误并保留输入；空内容、超过 4 MiB 或不合法的 YAML 不能覆盖原模板。
+
+依赖新版 Master 的 `GET/POST /api/settings/agent-encryption`、`GET/PUT /api/settings/agent-config-template` 接口和新版 Agent 的外置配置支持；模板功能需同时更新前端与 Master。生产管理页面请通过 HTTPS 访问。更新配置无需重新编译 Agent；下次启动或常驻服务重启读取新配置。二进制只内置解密私钥，无法保证对节点 root 保密。
 
 Vue 3 + TypeScript + Vite，监听 **10111**，通过同源 `/api` 调用主控 **10110**。数据来自主控 SQLite，没有浏览器模拟数据。
 
