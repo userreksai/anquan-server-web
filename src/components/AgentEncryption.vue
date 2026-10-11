@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Copy, Download, LoaderCircle, LockKeyhole, Save } from 'lucide-vue-next'
+import { Copy, Download, LoaderCircle, LockKeyhole, Save, Send } from 'lucide-vue-next'
 import { api } from '../api'
 import { agentConfigTemplate } from '../agent-config-template'
+import AgentConfigDelivery from './AgentConfigDelivery.vue'
 
 const yaml = ref(agentConfigTemplate)
 const ciphertext = ref('')
 const busy = ref(false)
 const templateAction = ref<'load' | 'save' | ''>('load')
-const pending = computed(() => busy.value || templateAction.value !== '')
+const deliveryActive = ref(false)
+const delivery = ref<InstanceType<typeof AgentConfigDelivery> | null>(null)
+const pending = computed(() => busy.value || templateAction.value !== '' || deliveryActive.value)
 const error = ref('')
 const message = ref('')
 const size = computed(() => new TextEncoder().encode(yaml.value).length)
@@ -76,7 +79,7 @@ function download() {
 
 <template>
   <div class="age-config">
-    <div class="info-banner"><LockKeyhole :size="23" /><div><strong>编辑配置，加密后部署到 Agent</strong><p>将 config.age 放在 Agent 可执行文件所在目录。单次运行下次执行生效；常驻服务重启后生效。</p><p>进入页面会读取已存储的模板，首次使用内置示例。请核对目标路径、主控地址和每台机器唯一的 agent_ip。</p></div></div>
+    <div class="info-banner"><LockKeyhole :size="23" /><div><strong>编辑配置，下发或加密后部署到 Agent</strong><p>点击“下发配置”选择目标机器，主控通过 Agent 主动建立的 TCP 55556 长连接投递。未下发配置时，Agent 使用可执行文件同目录的配置文件。</p><p>下发配置覆盖采集规则，主控地址和机器标识沿用本机启动配置。进入页面会读取已存储的模板，首次使用内置示例；手动部署时，将 config.age 放在 Agent 可执行文件所在目录。</p></div></div>
     <form @submit.prevent="encrypt">
       <div class="age-columns">
         <section class="panel age-editor">
@@ -85,6 +88,7 @@ function download() {
           <textarea id="age-yaml" v-model="yaml" :disabled="pending" required spellcheck="false" autocomplete="off" wrap="off" />
           <div class="age-actions">
             <button class="button primary" type="submit" :disabled="pending || !yaml.trim() || size > 4 * 1024 * 1024"><LoaderCircle v-if="busy" :size="17" class="spin" /><LockKeyhole v-else :size="17" />{{ busy ? '正在加密…' : '加密配置' }}</button>
+            <button type="button" class="button primary" :disabled="pending || !yaml.trim() || size > 4 * 1024 * 1024" @click="delivery?.open()"><Send :size="17" />下发配置</button>
             <button type="button" class="button secondary" :disabled="pending || !yaml.trim() || size > 4 * 1024 * 1024" @click="saveTemplate"><LoaderCircle v-if="templateAction === 'save'" :size="17" class="spin" /><Save v-else :size="17" />{{ templateAction === 'save' ? '正在存储…' : '存储模板' }}</button>
             <button type="button" class="button secondary" :disabled="pending" @click="restoreTemplate()"><LoaderCircle v-if="templateAction === 'load'" :size="17" class="spin" />{{ templateAction === 'load' ? '读取模板…' : '恢复示例' }}</button>
           </div>
@@ -99,6 +103,7 @@ function download() {
       <p v-if="error" class="age-error" role="alert">{{ error }}</p>
       <p v-if="message" class="age-success" role="status">{{ message }}</p>
     </form>
+    <AgentConfigDelivery ref="delivery" :yaml="yaml" :disabled="busy || templateAction !== ''" @active="deliveryActive = $event" />
     <p class="age-footnote">点击“存储模板”会将当前 YAML 明文保存到服务器，供登录后跨浏览器、跨设备恢复；未存储的编辑不会更新模板。修改输入后旧密文会清空，请重新加密。存储和加密均检查 YAML 格式，具体字段由 Agent 启动时校验。</p>
   </div>
 </template>
