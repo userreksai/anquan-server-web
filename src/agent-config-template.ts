@@ -60,12 +60,13 @@ login:
   # path: /var/log/auth.log
   # last_command: last
 
-# server: [] 表示仅生成本地通知、日志和指标；主控 UDP 默认监听 55555。
+# UDP 数据发给列表中的全部主控；裸 IP 默认使用 55555，也支持 IP:端口。
+# server: [192.168.0.1,192.168.0.2] 为正确的多主控格式。
+# TCP 配置主控独立使用启动时的 ANQUAN_MASTER（默认端口 55556）。
+# server: [] 只关闭 UDP 上报，不影响接收平台配置。
 server:
-  - 8.217.222.30:55555
-# 下方为当前节点示例，部署其他节点必须修改，不能多台机器共用相同 IP。
-# 删除 agent_ip 时，默认使用连接主控的本地出口地址。
-agent_ip: 49.7.214.217
+  - 8.217.222.30
+# 机器 IP 由 Agent 和配置主控握手时自动识别 NAT 后的来源地址，无需填写。
 
 setup:
   logs: /var/log/时间anquan.log
