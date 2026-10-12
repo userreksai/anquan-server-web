@@ -79,3 +79,15 @@ export interface PageResult<T> {
   page: number
   page_size: number
 }
+
+export interface AgentConfigDelivery {
+  machine_ip: string
+  host: string
+  alias: string
+  connected: boolean
+  revision: string
+  status: 'unassigned' | 'pending' | 'applied' | 'failed'
+  error: string
+  updated_at: string | null
+  applied_at: string | null
+}
