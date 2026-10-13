@@ -3,7 +3,7 @@ set -eu
 
 # Native Nginx deployment on Ubuntu/Debian.
 if [ "$#" -gt 1 ]; then
-  echo "用法：sudo sh deploy/deploy.sh [后端IP或域名:10110]" >&2
+  echo "用法：sudo sh deploy/deploy.sh [--local | 后端IP或域名:10110]" >&2
   exit 1
 fi
 [ "$(id -u)" -eq 0 ] || { echo '请使用 sudo 或 root 执行。' >&2; exit 1; }
@@ -11,7 +11,11 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 config_dir="$repo_dir/.deploy"
 if [ "$#" -eq 1 ]; then
-  upstream=$1
+  case "$1" in
+    --local) upstream=127.0.0.1:10110 ;;
+    --*) echo "未知选项：$1" >&2; exit 1 ;;
+    *) upstream=$1 ;;
+  esac
 elif [ -f "$config_dir/master-upstream" ]; then
   upstream=$(cat "$config_dir/master-upstream")
 else
