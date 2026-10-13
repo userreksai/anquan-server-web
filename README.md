@@ -28,7 +28,7 @@ cd /opt/anquan
 sudo git clone https://github.com/userreksai/anquan-server-web.git
 cd anquan-server-web
 # 同一台服务器部署前后端
-sudo sh deploy/deploy.sh 127.0.0.1:10110
+sudo sh deploy/deploy.sh --local
 # 如果后端在另一台服务器，改用其内网 IP，例如：
 # sudo sh deploy/deploy.sh 192.168.1.10:10110
 ```
@@ -47,6 +47,27 @@ sudo tail -f /var/log/nginx/error.log
 ```
 
 更换后端地址时重新带参数执行脚本。Nginx 随服务器自动启动；仅管理本站的 `anquan.conf`，保留其他站点配置。首次部署前确认没有其他服务或重复站点配置占用 10111。
+
+### systemd 主控与本机 Nginx：修复 API 路由
+
+主控以 `anquan-master` systemd 服务运行，数据库位于同机 `/data/anquan/anquan.db` 时，网页 API 应由本机 Nginx 转发到 `127.0.0.1:10110`。浏览器继续访问管理域名的同源 `/api/`；主控直接写本机 SQLite，不访问 Agent 的中转域名。不要把浏览器请求改成 `localhost`，那会指向使用者自己的电脑。
+
+现有站点只需修复 API 路由时，执行以下纯本地脚本。它不会联网、安装依赖、重建网页或重启主控，保留站点 SSL、页面目录和其他 location：
+
+```sh
+cd /opt/anquan/anquan-server-web
+sudo sh deploy/repair-local-api.sh
+# API location 位于现有 HTTPS 站点时，明确传入该配置文件，例如：
+# sudo sh deploy/repair-local-api.sh /etc/nginx/sites-available/prodsafety.conf
+```
+
+默认修改 `/etc/nginx/conf.d/anquan.conf`。脚本支持文件中唯一的独立多行 `location /api/ { ... }` 或 `location ^~ /api/ { ... }`，要求块内为单行指令且恰好一个 `proxy_pass`。只将该块上游设为 `http://127.0.0.1:10110`，将 Host 设为 `$http_host`；未设置 Host 时自动补充。多个 API 块、嵌套块、include、跨行指令或其他无法明确处理的布局会报错，原文件不变。符号链接会解析到实际配置文件后修改，链接本身保留。
+
+写入前将备份和暂存文件放在 `/var/backups/anquan-nginx/` 的独立目录，避免它们被 `sites-enabled/*` 等 Nginx include 误加载；保留原文件 owner/mode。执行 `nginx -t` 和 `systemctl reload nginx`，校验或重载失败时恢复原配置并尝试重新加载。成功后输出备份位置。先确认本机主控确实监听 TCP 10110；这个工具用于原生同机部署，Docker web 容器仍使用 `master:10110`。
+
+后续重新部署网页时用 `sudo sh deploy/deploy.sh --local`，显式覆盖 `.deploy/master-upstream` 曾保存的外部地址，成功后保存本地地址。无参数更新继续沿用原保存地址，兼容前后端分机部署。完整部署仍需下载构建依赖，单纯修复请用上述本地脚本。
+
+修复后正常链路为 `浏览器 → 管理 HTTPS 入口 → 本机 Nginx → 127.0.0.1:10110 → 本机 SQLite`。所有 HTTP 代理层应保留原始 Host（包括端口）；如入口已经改写 Host，后续保留该错误值仍可能触发 403。脚本保留既有认证、访问控制等规则；若它们拒绝 PUT，或主控未配置可信管理来源，需要同时修复对应规则，不能通过关闭来源校验解决。
 
 ## 本地开发
 
