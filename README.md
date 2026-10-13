@@ -12,7 +12,7 @@
 
 下发弹窗和配置状态列表均支持按 IP、主机名或别名搜索，以及每页 10/25/50/100 台分页。弹窗翻页和搜索时保留全部已选机器，“选择当前页”仅作用于当前页，“清空选择”取消所有页的选择；确认按钮显示实际下发总数。修改搜索条件或每页数量回到第一页，状态刷新保留查询和页码，机器减少时自动回到有效页。
 
-依赖新版 Master 的 `GET/POST /api/settings/agent-encryption`、`GET/PUT /api/settings/agent-config-template` 接口和新版 Agent 的外置配置支持；模板功能需同时更新前端与 Master。生产管理页面请通过 HTTPS 访问。更新配置无需重新编译 Agent；下次启动或常驻服务重启读取新配置。二进制只内置解密私钥，无法保证对节点 root 保密。
+依赖新版 Master 的 `GET/POST /api/settings/agent-encryption`、`GET/POST /api/settings/agent-config-template` 接口和新版 Agent 的外置配置支持。模板保存默认使用 `POST`，避免部分入口拒绝 `PUT`；新版 Master 继续接受旧版前端的 `PUT`。请先更新支持模板 POST 的 Master，再更新前端，旧版 Master 没有该 POST 路由。浏览器继续请求管理域名的同源 `/api/`，由主控写本机数据库；如果入口连 POST 也拒绝，前端改动不能保证消除 403。生产管理页面请通过 HTTPS 访问。更新配置无需重新编译 Agent；下次启动或常驻服务重启读取新配置。二进制只内置解密私钥，无法保证对节点 root 保密。
 
 Vue 3 + TypeScript + Vite，监听 **10111**，通过同源 `/api` 调用主控 **10110**。数据来自主控 SQLite，没有浏览器模拟数据。
 
@@ -119,6 +119,7 @@ pnpm dev
 ```sh
 pnpm typecheck
 pnpm test:webhooks
+pnpm test:templates
 pnpm build
 ```
 
@@ -147,6 +148,8 @@ docker run -d --name anquan-web --network anquan -p 10111:10111 anquan-server-we
 | 当前会话 | `GET /auth/me` |
 | 退出 | `POST /auth/logout` |
 | 修改密码 | `PUT /auth/password`：`current_password,new_password` |
+| 读取 Agent 模板 | `GET /settings/agent-config-template`：返回 `{yaml: string \| null}` |
+| 保存 Agent 模板 | `POST /settings/agent-config-template`：`{yaml: string}`，返回保存原文；后端保留旧 `PUT` 兼容 |
 | 统计 | `GET /overview` |
 | 机器列表 | `GET /machines?q=&page=&page_size=` |
 | 机器信息 | `GET /machines/{ip}` |
