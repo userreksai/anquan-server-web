@@ -41,7 +41,7 @@ async function saveTemplate() {
   templateAction.value = 'save'
   try {
     const result = await api<{ yaml: string | null }>('/settings/agent-config-template', {
-      method: 'PUT', body: JSON.stringify({ yaml: yaml.value }), signal: controller.signal,
+      method: 'POST', body: JSON.stringify({ yaml: yaml.value }), signal: controller.signal,
     })
     if (controller.signal.aborted) return
     if (result?.yaml !== yaml.value) throw new Error('服务器未确认存储当前模板，请重试。')
