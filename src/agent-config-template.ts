@@ -66,7 +66,7 @@ login:
 # server: [] 只关闭 UDP 上报，不影响接收平台配置。
 server:
   - 8.217.222.30
-# 机器 IP 由 Agent 和配置主控握手时自动识别 NAT 后的来源地址，无需填写。
+# Agent 自动获取并上报本机出口 IP，无需填写；TCP 配置连接与 UDP 上报使用同一机器标识。
 
 setup:
   logs: /var/log/时间anquan.log

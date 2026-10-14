@@ -79,7 +79,7 @@ function download() {
 
 <template>
   <div class="age-config">
-    <div class="info-banner"><LockKeyhole :size="23" /><div><strong>编辑配置，下发或加密后部署到 Agent</strong><p>Agent 启动时通过 ANQUAN_MASTER 连接 TCP 55556，自动识别机器来源 IP；无本地配置也可登记并等待下发。点击“下发配置”选择目标机器即可生效。</p><p>配置中的 server 控制向全部主控发送 UDP 数据，裸 IP 默认使用 55555；server: [] 关闭 UDP 上报，仍可接收配置。无需填写 agent_ip。进入页面会读取已存储的模板；手动部署时可使用程序旁的 config.age。</p></div></div>
+    <div class="info-banner"><LockKeyhole :size="23" /><div><strong>编辑配置，下发或加密后部署到 Agent</strong><p>Agent 启动时通过 ANQUAN_MASTER 连接 TCP 55556，自动获取并上报本机出口 IP，TCP 配置连接和 UDP 上报使用同一机器标识；无本地配置也可登记并等待下发。点击“下发配置”选择目标机器即可生效。</p><p>配置中的 server 控制向全部主控发送 UDP 数据，裸 IP 默认使用 55555；server: [] 关闭 UDP 上报，仍可接收配置。无需填写 agent_ip。进入页面会读取已存储的模板；手动部署时可使用程序旁的 config.age。</p></div></div>
     <form @submit.prevent="encrypt">
       <div class="age-columns">
         <section class="panel age-editor">
