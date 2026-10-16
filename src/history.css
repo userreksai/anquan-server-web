@@ -1,4 +1,6 @@
 .event-type.command_history { color: #11665b; background: #e8f5f0; }
+.event-type.security_event { color: #5366a5; background: #eef0ff; }
+.event-type.component_status { color: #496a78; background: #edf5f8; }
 .command-detail { margin: 20px 0; }
 .command-detail h4 { margin: 12px 0 8px; }
 .command-detail pre { margin: 0; padding: 16px; background: #f3f6f8; border: 1px solid #e1e7ed; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }

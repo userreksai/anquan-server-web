@@ -9,6 +9,43 @@ const moduleNames: Record<string, string> = {
   history: '命令采集',
   state: '基线状态',
   machine: '机器状态',
+  auditd: 'Linux Audit',
+  native_fim: '实时文件监控',
+  tetragon: 'Tetragon',
+  sudo: 'sudo 审计',
+  policies: '系统策略',
+  ssh_auth: 'SSH 认证监控',
+  task: '任务执行记录',
+}
+
+export function securityEventTitle(data: Record<string, unknown>): string {
+  const kind = value(data, 'kind')
+  const labels: Record<string, string> = {
+    exec: '外部程序执行', process_exec: '进程执行', process_exit: '进程退出',
+    file_change: '文件发生变化', file_modified: '文件内容已修改', file_added: '新增文件', file_deleted: '文件已删除',
+    metadata_changed: '文件权限或属主变化', audit_event: '系统审计记录', audit_record: '系统审计记录',
+    sudo: 'sudo 操作记录', sudo_event: 'sudo 操作记录', sudo_session: 'sudo 会话记录', sudo_io: 'sudo 会话录制',
+    policy_drift: '系统策略与目标不一致', policy_applied: '系统策略已应用', policy_error: '系统策略应用失败',
+    collection_error: '组件采集异常', queue_overflow: '安全事件队列已满',
+    task_started: '计划任务开始执行', task_finished: '计划任务执行成功', task_failed: '计划任务执行失败',
+    failed_authentication: 'SSH 认证失败', brute_force: 'SSH 失败认证达到阈值',
+    ssh_auth_failure: 'SSH 认证失败', ssh_bruteforce: 'SSH 失败认证达到阈值', collector_error: '采集器异常',
+  }
+  return labels[kind] || value(data, 'message') || kind || '安全运行事件'
+}
+
+export function securityEventSubtitle(data: Record<string, unknown>): string {
+  return [value(data, 'source') || value(data, 'component'), value(data, 'path') || value(data, 'command') || value(data, 'session_id')].filter(Boolean).join(' · ') || '查看完整事件与关联信息'
+}
+
+export function taskOutputText(value: unknown): string {
+  if (typeof value !== 'string' || !value) return '（无输出）'
+  if (value.length > 128 * 1024) return '输出超过预览上限，请查看原始事件。'
+  try {
+    const bytes = Uint8Array.from(atob(value), character => character.charCodeAt(0))
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
+    catch { return `二进制输出（${bytes.length} 字节），请查看原始 Base64 数据。` }
+  } catch { return '输出编码无效，请查看原始事件。' }
 }
 
 function value(data: Record<string, unknown>, key: string): string {

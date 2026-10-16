@@ -31,7 +31,7 @@ function mount(t) {
     if (name === 'vue') return { ...vue, onMounted: () => {}, onBeforeUnmount: fn => unmount.push(fn) }
     if (name === '../api') return apiModule
     if (name === '../agent-config-template') return exampleModule
-    if (name === 'lucide-vue-next' || name === './AgentConfigDelivery.vue') return {}
+    if (name === 'lucide-vue-next' || name === './AgentConfigDelivery.vue' || name === './SecurityProfileEditor.vue') return {}
     throw new Error(`Unexpected component dependency: ${name}`)
   }).default
   const scope = vue.effectScope()

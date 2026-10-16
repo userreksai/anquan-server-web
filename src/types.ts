@@ -91,3 +91,40 @@ export interface AgentConfigDelivery {
   updated_at: string | null
   applied_at: string | null
 }
+
+export interface SecurityComponent {
+  name: string
+  enabled: boolean
+  installed: boolean
+  running: boolean
+  state: string
+  version?: string
+  config_hash?: string
+  applied_at?: string
+  error?: string
+  message?: string
+  omitted_checks?: number
+  checks?: { truncated?: boolean; [key: string]: unknown }[]
+}
+
+export interface ComponentReport {
+  machine_ip: string
+  host: string
+  time: string
+  received_at: string
+  data: {
+    components?: SecurityComponent[]
+    [key: string]: unknown
+  }
+}
+
+export interface SudoSession {
+  id: number
+  machine_ip: string
+  host: string
+  session_id: string
+  generation: string
+  time: string
+  received_at: string
+  files: { name: string; size: number; received_bytes: number; complete: boolean }[]
+}
