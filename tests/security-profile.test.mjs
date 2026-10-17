@@ -132,6 +132,40 @@ test('sysctl parser rejects duplicates and never interprets values as shell comm
   assert.throws(() => profileModule.parseSysctl('kernel/kptr_restrict = 2'), /格式有误/)
 })
 
+test('component status keeps legacy two-minute expiry unless changes-only snapshots are declared', () => {
+  const receivedAt = Date.parse('2026-10-17T03:00:00Z')
+  const report = { received_at: new Date(receivedAt).toISOString(), data: { snapshot_interval_seconds: 300 } }
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 120_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 120_001), true)
+  report.data.status_reporting = 'periodic'
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 120_001), true)
+})
+
+test('changes-only status allows two snapshot intervals with a two-minute minimum', () => {
+  const receivedAt = Date.parse('2026-10-17T03:00:00Z')
+  const report = { received_at: new Date(receivedAt).toISOString(), data: { status_reporting: 'changes_only', snapshot_interval_seconds: 300 } }
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 300_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 600_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 600_001), true)
+  report.data.snapshot_interval_seconds = 1
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 120_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 120_001), true)
+  report.data.snapshot_interval_seconds = 3600
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 7_200_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 7_200_001), true)
+  report.data.snapshot_interval_seconds = 86400
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 172_800_000), false)
+  assert.equal(profileModule.componentReportStale(report, receivedAt + 172_800_001), true)
+})
+
+test('malformed or unbounded snapshot intervals cannot extend status freshness', () => {
+  const receivedAt = Date.parse('2026-10-17T03:00:00Z')
+  for (const interval of [undefined, null, 0, -1, NaN, Infinity, 300.5, '300', [], {}, 86401, Number.MAX_SAFE_INTEGER]) {
+    const report = { received_at: new Date(receivedAt).toISOString(), data: { status_reporting: 'changes_only', snapshot_interval_seconds: interval } }
+    assert.equal(profileModule.componentReportStale(report, receivedAt + 120_001), true, `interval: ${String(interval)}`)
+  }
+})
+
 test('task output safely previews UTF-8 and preserves binary or malformed output boundaries', () => {
   assert.equal(eventLabels.taskOutputText(Buffer.from('任务输出\n<script>alert(1)</script>').toString('base64')), '任务输出\n<script>alert(1)</script>')
   assert.match(eventLabels.taskOutputText('/w=='), /二进制输出/)

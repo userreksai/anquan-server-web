@@ -1,3 +1,5 @@
+import type { ComponentReport } from './types'
+
 export interface SecurityProfile {
   enabled: boolean
   install_missing: boolean
@@ -70,6 +72,14 @@ export function parseSysctl(value: string): Record<string, string> {
 }
 
 export const componentNames: Record<string, string> = { auditd: 'Linux Audit', native_fim: 'Agent 文件监控', tetragon: 'Tetragon', sudo: 'sudo 审计', ssh_auth: 'SSH 认证监控', task_wrapper: '任务执行记录', policies: '系统加固策略', ssh: 'SSH 策略', sysctl: '内核参数', grub: '启动保护' }
+
+export function componentReportStale(report: Pick<ComponentReport, 'received_at' | 'data'>, now = Date.now()): boolean {
+  const interval = report.data.snapshot_interval_seconds
+  const changesOnly = report.data.status_reporting === 'changes_only'
+    && typeof interval === 'number' && Number.isInteger(interval) && interval > 0 && interval <= 86400
+  const timeout = changesOnly ? Math.max(120_000, interval * 2000) : 120_000
+  return now - new Date(report.received_at).valueOf() > timeout
+}
 
 export function componentState(state: string): string {
   return ({ running: '运行中', ready: '就绪', applied: '已应用', configured: '已配置', disabled: '已禁用', installing: '安装中', pending: '等待应用', not_installed: '未安装', missing: '未安装', install_failed: '安装失败', config_failed: '配置失败', failed: '失败', error: '异常', drift: '配置偏离目标', audit: '仅检查', audit_only: '仅检查', unsupported: '环境不支持', degraded: '部分异常', stopped: '未运行', healthy: '正常' } as Record<string, string>)[state] || state || '未知状态'

@@ -2,26 +2,28 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Check, Clock3, LoaderCircle, RefreshCw, Save, SlidersHorizontal } from 'lucide-vue-next'
 import { api } from '../api'
-import { readEventPolicy, tetragonKindOptions } from '../event-policy'
+import { readEventPolicy, securityEventSeverityOptions, tetragonKindOptions } from '../event-policy'
 import type { EventPolicy } from '../event-policy'
 
 const emit = defineEmits<{ saved: [policy: EventPolicy] }>()
 const policy = ref<EventPolicy | null>(null)
 const ignoredKinds = ref<string[]>([])
 const retentionHours = ref<12 | 24>(24)
+const minSeverity = ref<EventPolicy['security_event_min_severity']>('warning')
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const message = ref('')
 const controller = new AbortController()
 const pending = computed(() => loading.value || saving.value)
-const dirty = computed(() => policy.value !== null && (retentionHours.value !== policy.value.scan_summary_retention_hours || JSON.stringify([...ignoredKinds.value].sort()) !== JSON.stringify([...policy.value.tetragon_ignored_kinds].sort())))
+const dirty = computed(() => policy.value !== null && (minSeverity.value !== policy.value.security_event_min_severity || retentionHours.value !== policy.value.scan_summary_retention_hours || JSON.stringify([...ignoredKinds.value].sort()) !== JSON.stringify([...policy.value.tetragon_ignored_kinds].sort())))
 const canSave = computed(() => policy.value !== null && !pending.value && dirty.value)
 
 function adopt(value: EventPolicy) {
   policy.value = value
   ignoredKinds.value = [...value.tetragon_ignored_kinds]
   retentionHours.value = value.scan_summary_retention_hours
+  minSeverity.value = value.security_event_min_severity
 }
 function changed() { message.value = ''; error.value = '' }
 function ignoreRoutineEvents() {
@@ -50,7 +52,7 @@ async function savePolicy() {
   try {
     const result = await api<unknown>('/settings/event-policy', {
       method: 'PUT',
-      body: JSON.stringify({ tetragon_ignored_kinds: ignoredKinds.value, scan_summary_retention_hours: retentionHours.value }),
+      body: JSON.stringify({ tetragon_ignored_kinds: ignoredKinds.value, scan_summary_retention_hours: retentionHours.value, security_event_min_severity: minSeverity.value }),
       signal: controller.signal,
     })
     if (controller.signal.aborted) return
@@ -76,6 +78,11 @@ onBeforeUnmount(() => controller.abort())
     <form v-if="policy" @submit.prevent="savePolicy">
       <fieldset :disabled="pending">
         <div class="event-policy-columns">
+          <section class="event-policy-card event-policy-severity" aria-labelledby="event-policy-severity-heading">
+            <h3 id="event-policy-severity-heading"><label for="event-policy-min-severity">最低安全运行事件级别</label></h3>
+            <p id="event-policy-severity-description">默认仅保留警告及以上的异常，普通 auditd 进程执行、sudo 正常记录不入库、不通知。SSH 登录、安全告警、操作命令及单独开启的 sudo 录制文件上传不受影响；已有历史保留。</p>
+            <select id="event-policy-min-severity" v-model="minSeverity" aria-describedby="event-policy-severity-description" @change="changed"><option v-for="option in securityEventSeverityOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+          </section>
           <section class="event-policy-card" aria-labelledby="event-policy-tetragon">
             <div class="event-policy-card-heading"><h3 id="event-policy-tetragon">屏蔽 Tetragon 事件类型</h3><span class="event-policy-count">已选 {{ ignoredKinds.length }} 类</span></div>
             <p>勾选要屏蔽的具体类型。所选类型的新上报将不入库、不发送通知；已有记录保留，其他来源的事件不受影响。</p>
@@ -112,6 +119,9 @@ h2 { font-size: 16px; } h3 { font-size: 14px; }
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .event-policy-columns { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(270px, 1fr); gap: 18px; }
 .event-policy-card { min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: 18px; }
+.event-policy-severity { grid-column: 1 / -1; }
+.event-policy-severity label { margin: 0; font-size: inherit; color: inherit; }
+.event-policy-severity select { width: 100%; max-width: 360px; margin-top: 14px; }
 .event-policy-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .event-policy-count { font-size: 12px; color: #718198; white-space: nowrap; }
 .event-policy-shortcuts { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
