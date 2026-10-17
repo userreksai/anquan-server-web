@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Download, LoaderCircle, RefreshCw, Search, Server, ShieldCheck } from 'lucide-vue-next'
 import { api, ApiError, query } from '../api'
-import { componentNames, componentState, componentTruncation } from '../security-profile'
+import { componentNames, componentReportStale, componentState, componentTruncation } from '../security-profile'
 import type { AgentConfigDelivery, ComponentReport, PageResult, SecurityComponent, SudoSession } from '../types'
 import Pagination from './Pagination.vue'
 
@@ -41,7 +41,7 @@ function time(value?: string) {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('zh-CN', { hour12: false })
 }
-function stale(report: ComponentReport) { return Date.now() - new Date(report.received_at).valueOf() > 120_000 }
+function stale(report: ComponentReport) { return componentReportStale(report) }
 function inventory(report: ComponentReport): string {
   const value = report.data.inventory
   if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
@@ -104,7 +104,7 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(timer) })
 
 <template>
   <section class="panel component-panel">
-    <div class="component-heading"><div><h2><ShieldCheck :size="20" />组件运行状态 <span class="count-tag">{{ rows.length }}</span></h2><p>展示每台 Agent 最近实际上报的组件状态，每 10 秒刷新。超过 2 分钟未上报会标记为历史状态。</p></div><button class="button secondary small" :disabled="loading" @click="refresh"><RefreshCw :size="15" :class="{ spin: loading }" />刷新状态</button></div>
+    <div class="component-heading"><div><h2><ShieldCheck :size="20" />组件运行状态 <span class="count-tag">{{ rows.length }}</span></h2><p>展示每台 Agent 最近实际上报的组件状态，每 10 秒刷新页面。正常稳定只更新最新快照，异常、状态变化和恢复保留事件记录。新版 Agent 默认正常稳定约每 5 分钟发送快照，长检查周期按实际周期刷新，超过两个快照周期（至少 2 分钟）未收到会标记为历史状态；旧版 Agent 仍按 2 分钟判断。</p></div><button class="button secondary small" :disabled="loading" @click="refresh"><RefreshCw :size="15" :class="{ spin: loading }" />刷新状态</button></div>
     <p v-if="error" class="component-error" role="alert">{{ error }} 已保留上次读取的数据。</p>
     <div v-if="!machineIP" class="component-search"><Search :size="16" /><input v-model="search" type="search" aria-label="搜索组件状态机器" placeholder="搜索 IP、主机名或别名…" /></div>
     <div class="component-list" :aria-busy="loading">

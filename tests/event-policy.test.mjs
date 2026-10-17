@@ -35,7 +35,7 @@ function mount(t) {
   t.after(() => { for (const fn of unmount) fn(); scope.stop() })
   return { state, emitted, unmount }
 }
-const policy = (kinds = [], hours = 24) => ({ tetragon_ignored_kinds: kinds, scan_summary_retention_hours: hours })
+const policy = (kinds = [], hours = 24, severity = 'warning') => ({ tetragon_ignored_kinds: kinds, scan_summary_retention_hours: hours, security_event_min_severity: severity })
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 test('failed or malformed initial reads never enable a default-overwriting save', async t => {
@@ -62,10 +62,11 @@ test('read uses persisted policy and shortcuts preserve other selected kinds unt
     assert.equal(url, '/api/settings/event-policy')
     assert.equal(options.credentials, 'same-origin')
     assert.equal(options.method, undefined)
-    return json(policy(['process_lsm'], 12))
+    return json(policy(['process_lsm'], 12, 'notice'))
   }
   await state.loadPolicy()
   assert.equal(state.retentionHours.value, 12)
+  assert.equal(state.minSeverity.value, 'notice')
   assert.deepEqual([...state.ignoredKinds.value], ['process_lsm'])
   assert.equal(state.dirty.value, false)
   state.ignoreRoutineEvents()
@@ -83,6 +84,7 @@ test('save sends exact PUT contract, blocks overlapping actions and adopts serve
   await state.loadPolicy()
   state.ignoreRoutineEvents()
   state.retentionHours.value = 12
+  state.minSeverity.value = 'info'
   let finish
   let calls = 0
   globalThis.fetch = (url, options) => {
@@ -90,7 +92,7 @@ test('save sends exact PUT contract, blocks overlapping actions and adopts serve
     assert.equal(url, '/api/settings/event-policy')
     assert.equal(options.method, 'PUT')
     assert.equal(options.credentials, 'same-origin')
-    assert.deepEqual(JSON.parse(options.body), policy(['process_exec', 'process_exit'], 12))
+    assert.deepEqual(JSON.parse(options.body), policy(['process_exec', 'process_exit'], 12, 'info'))
     return new Promise(resolve => { finish = resolve })
   }
   const saving = state.savePolicy()
@@ -100,14 +102,15 @@ test('save sends exact PUT contract, blocks overlapping actions and adopts serve
   state.clearIgnoredKinds()
   assert.deepEqual([...state.ignoredKinds.value], ['process_exec', 'process_exit'])
   assert.equal(calls, 1)
-  finish(json(policy(['process_exit', 'process_exec'], 24)))
+  finish(json(policy(['process_exit', 'process_exec'], 24, 'error')))
   await saving
   assert.equal(state.retentionHours.value, 24)
+  assert.equal(state.minSeverity.value, 'error')
   assert.deepEqual([...state.ignoredKinds.value], ['process_exec', 'process_exit'])
   assert.equal(state.dirty.value, false)
   assert.equal(state.canSave.value, false)
   assert.match(state.message.value, /全局生效/)
-  assert.deepEqual(emitted, [['saved', policy(['process_exec', 'process_exit'])]])
+  assert.deepEqual(emitted, [['saved', policy(['process_exec', 'process_exit'], 24, 'error')]])
 })
 
 test('save errors and malformed confirmation retain edits without claiming success', async t => {
@@ -116,10 +119,12 @@ test('save errors and malformed confirmation retain edits without claiming succe
   await state.loadPolicy()
   state.ignoreRoutineEvents()
   state.retentionHours.value = 12
+  state.minSeverity.value = 'critical'
   globalThis.fetch = async () => json({ error: '拒绝写入' }, 403)
   await state.savePolicy()
   assert.match(state.error.value, /拒绝写入/)
   assert.equal(state.retentionHours.value, 12)
+  assert.equal(state.minSeverity.value, 'critical')
   assert.equal(state.canSave.value, true)
   assert.deepEqual(state.policy.value, policy())
   globalThis.fetch = async () => json(null)
@@ -162,7 +167,30 @@ test('all supported kinds are selectable and invalid values cannot become a save
   const kinds = ['process_exec', 'process_exit', 'process_kprobe', 'process_tracepoint', 'process_loader', 'process_uprobe', 'process_lsm', 'process_usdt', 'runtime']
   assert.deepEqual(policyModule.tetragonKindOptions.map(option => option.value), kinds)
   assert.deepEqual(policyModule.readEventPolicy(policy([...kinds].reverse(), 12)), policy(kinds, 12))
-  for (const value of [null, [], {}, policy(['unknown']), policy([12]), policy([], '24'), policy([], 0), { tetragon_ignored_kinds: null, scan_summary_retention_hours: 24 }]) {
+  assert.deepEqual(policyModule.securityEventSeverityOptions.map(option => option.value), ['debug', 'info', 'notice', 'warning', 'error', 'critical'])
+  for (const severity of ['debug', 'info', 'notice', 'warning', 'error', 'critical']) {
+    assert.deepEqual(policyModule.readEventPolicy(policy([], 24, severity)), policy([], 24, severity))
+  }
+  for (const value of [null, [], {}, policy(['unknown']), policy([12]), policy([], '24'), policy([], 0), policy([], 24, 'fatal'), policy([], 24, null), policy([], 24, 3), { tetragon_ignored_kinds: null, scan_summary_retention_hours: 24 }]) {
     assert.throws(() => policyModule.readEventPolicy(value), /响应无效/)
   }
+})
+
+test('missing severity on older server reads displays warning and level-only edits can be saved', async t => {
+  const { state, emitted } = mount(t)
+  globalThis.fetch = async () => json({ tetragon_ignored_kinds: [], scan_summary_retention_hours: 24 })
+  await state.loadPolicy()
+  assert.equal(state.minSeverity.value, 'warning')
+  assert.equal(state.dirty.value, false)
+  state.minSeverity.value = 'debug'
+  state.changed()
+  assert.equal(state.canSave.value, true)
+  globalThis.fetch = async (_, options) => {
+    assert.deepEqual(JSON.parse(options.body), policy([], 24, 'debug'))
+    return json(policy([], 24, 'debug'))
+  }
+  await state.savePolicy()
+  assert.equal(state.minSeverity.value, 'debug')
+  assert.equal(state.dirty.value, false)
+  assert.deepEqual(emitted, [['saved', policy([], 24, 'debug')]])
 })
