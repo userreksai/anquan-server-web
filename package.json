@@ -12,6 +12,7 @@
     "test:templates": "node --test tests/agent-template.test.mjs",
     "test:security": "node --test tests/security-profile.test.mjs",
     "test:event-policy": "node --test tests/event-policy.test.mjs",
+    "test:events": "node --test tests/events.test.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 10111"
   },
   "dependencies": {
