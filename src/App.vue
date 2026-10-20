@@ -9,12 +9,13 @@ import AgentEncryption from './components/AgentEncryption.vue'
 import SecurityComponentStatus from './components/SecurityComponentStatus.vue'
 import SecurityEventDetails from './components/SecurityEventDetails.vue'
 import EventPolicySettings from './components/EventPolicySettings.vue'
+import PackageDownloadSettings from './components/PackageDownloadSettings.vue'
 import WebhookTestFeedback from './components/WebhookTestFeedback.vue'
 import { requestWebhookTest } from './webhook-test'
 import './history.css'
 import type { Machine, Overview, PageResult, SecurityEvent, Webhook, WebhookTestFeedback as TestFeedback } from './types'
 
-type View = 'overview' | 'machines' | 'events' | 'webhooks' | 'encryption' | 'security'
+type View = 'overview' | 'machines' | 'events' | 'webhooks' | 'encryption' | 'security' | 'downloads'
 type Dialog = 'event' | 'machine' | 'webhook' | 'password' | 'delete' | null
 const view = ref<View>('overview')
 const mobileMenu = ref(false)
@@ -73,7 +74,7 @@ const passwordForm = ref({ current: '', next: '', confirm: '' })
 const deleteTarget = ref<{ kind: 'event' | 'machine' | 'webhook'; id: string | number; label: string } | null>(null)
 let lastFocused: HTMLElement | null = null
 let loadId = 0
-const title = computed(() => selectedMachine.value ? (selectedMachine.value.alias || selectedMachine.value.ip) : ({ overview: '安全概览', machines: '机器管理', events: '安全事件', webhooks: '通知配置', encryption: 'Agent 配置与加密', security: '组件与主机策略' }[view.value]))
+const title = computed(() => selectedMachine.value ? (selectedMachine.value.alias || selectedMachine.value.ip) : ({ overview: '安全概览', machines: '机器管理', events: '安全事件', webhooks: '通知配置', encryption: 'Agent 配置与加密', security: '组件与主机策略', downloads: 'Agent 安装下载' }[view.value]))
 const offlineMachines = computed(() => overview.value ? Math.max(0, overview.value.machines - overview.value.online_machines) : 0)
 const refreshStatus = computed(() => loading.value ? '正在刷新数据' : pageError.value ? '刷新失败，将自动重试' : !pageVisible.value || dialog.value || dialogBusy.value || savingHook.value || testingHook.value !== null ? '自动刷新已暂停' : eventType.value === 'command_history' ? '每 2 秒自动刷新' : '每 15 秒自动刷新')
 const isOnline = (machine: Machine) => machine.status ? machine.status === 'online' : machine.online
@@ -431,7 +432,7 @@ onBeforeUnmount(() => {
         <button :class="{ active: view === 'events' }" @click="navigate('events')"><Activity :size="19" /><span>安全事件</span></button>
       </nav>
       <span class="nav-label settings-label">管理设置</span>
-      <nav aria-label="管理设置"><button :class="{ active: view === 'security' }" @click="navigate('security')"><ShieldCheck :size="19" /><span>组件与主机策略</span></button><button :class="{ active: view === 'webhooks' }" @click="navigate('webhooks')"><WebhookIcon :size="19" /><span>通知配置</span></button><button :class="{ active: view === 'encryption' }" @click="navigate('encryption')"><KeyRound :size="19" /><span>Agent 配置与加密</span></button><button @click="openPassword"><KeyRound :size="19" /><span>修改密码</span></button></nav>
+      <nav aria-label="管理设置"><button :class="{ active: view === 'security' }" @click="navigate('security')"><ShieldCheck :size="19" /><span>组件与主机策略</span></button><button :class="{ active: view === 'downloads' }" @click="navigate('downloads')"><Globe :size="19" /><span>Agent 安装下载</span></button><button :class="{ active: view === 'webhooks' }" @click="navigate('webhooks')"><WebhookIcon :size="19" /><span>通知配置</span></button><button :class="{ active: view === 'encryption' }" @click="navigate('encryption')"><KeyRound :size="19" /><span>Agent 配置与加密</span></button><button @click="openPassword"><KeyRound :size="19" /><span>修改密码</span></button></nav>
       <div class="sidebar-bottom"><div class="sidebar-caption"><ShieldCheck :size="17" /><span>让每一次异常可被发现</span></div><div class="user-row"><span class="avatar">{{ user.slice(0, 1).toUpperCase() }}</span><div><strong>{{ user }}</strong><span>管理员</span></div><button class="logout-button" aria-label="退出登录" title="退出登录" @click="logout"><LogOut :size="18" /></button></div></div>
     </aside>
 
@@ -439,7 +440,7 @@ onBeforeUnmount(() => {
       <header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" aria-label="打开导航" @click="mobileMenu = true"><Menu :size="22" /></button><ShieldCheck :size="17" class="muted" /><span>安全中心</span><ChevronRight :size="14" /><strong>{{ selectedMachine ? '机器详情' : title }}</strong></div><div class="topbar-right"><span class="timezone-label"><Clock3 :size="14" />本地时间</span><span class="small-avatar">{{ user.slice(0, 1).toUpperCase() }}</span></div></header>
       <main>
         <div class="page-heading">
-          <div><button v-if="selectedMachine" class="back-link" @click="navigate('machines')"><ArrowLeft :size="15" />返回机器列表</button><span v-else class="eyebrow">{{ view === 'overview' ? 'SECURITY OVERVIEW' : view === 'machines' ? 'MACHINE INVENTORY' : view === 'events' ? 'SECURITY EVENTS' : view === 'security' ? 'SECURITY COMPONENTS' : view === 'encryption' ? 'AGENT CONFIGURATION' : 'NOTIFICATION SETTINGS' }}</span><h1>{{ title }}<span v-if="selectedMachine" class="badge" :class="isOnline(selectedMachine) ? 'success' : 'offline'"><span class="status-dot"></span>{{ isOnline(selectedMachine) ? '在线' : '异常离线' }}</span></h1><p>{{ selectedMachine ? '查看这台机器的完整安全记录，定位异常并记录处理结果。' : view === 'overview' ? '集中查看机器状态，及时发现并追踪安全异常。' : view === 'machines' ? '以机器 IP 为索引，掌握每台机器的安全状态。' : view === 'events' ? '追踪文件变化、远程登录与安全巡检的每一次记录。' : view === 'security' ? '集中配置审计组件和主机策略，查看实际运行状态及 sudo 会话文件。' : view === 'encryption' ? '编辑 YAML，通过长连接下发配置，或生成 Agent 可直接读取的加密配置。' : '管理告警通知地址，让重要的安全事件及时送达。' }}</p></div>
+          <div><button v-if="selectedMachine" class="back-link" @click="navigate('machines')"><ArrowLeft :size="15" />返回机器列表</button><span v-else class="eyebrow">{{ view === 'overview' ? 'SECURITY OVERVIEW' : view === 'machines' ? 'MACHINE INVENTORY' : view === 'events' ? 'SECURITY EVENTS' : view === 'security' ? 'SECURITY COMPONENTS' : view === 'encryption' ? 'AGENT CONFIGURATION' : view === 'downloads' ? 'AGENT PACKAGE DOWNLOADS' : 'NOTIFICATION SETTINGS' }}</span><h1>{{ title }}<span v-if="selectedMachine" class="badge" :class="isOnline(selectedMachine) ? 'success' : 'offline'"><span class="status-dot"></span>{{ isOnline(selectedMachine) ? '在线' : '异常离线' }}</span></h1><p>{{ selectedMachine ? '查看这台机器的完整安全记录，定位异常并记录处理结果。' : view === 'overview' ? '集中查看机器状态，及时发现并追踪安全异常。' : view === 'machines' ? '以机器 IP 为索引，掌握每台机器的安全状态。' : view === 'events' ? '追踪文件变化、远程登录与安全巡检的每一次记录。' : view === 'security' ? '集中配置审计组件和主机策略，查看实际运行状态及 sudo 会话文件。' : view === 'encryption' ? '编辑 YAML，通过长连接下发配置，或生成 Agent 可直接读取的加密配置。' : view === 'downloads' ? '管理内网 Agent 的组件安装下载，按需授权并在到期后自动关闭。' : '管理告警通知地址，让重要的安全事件及时送达。' }}</p></div>
           <div class="heading-actions"><button v-if="selectedMachine" class="button secondary" @click="editMachine"><Pencil :size="16" />编辑机器</button><button v-if="view === 'webhooks'" class="button primary" @click="editWebhook()"><Plus :size="17" />添加通知地址</button><button class="button secondary" :disabled="loading" @click="loadPage"><RefreshCw :size="16" :class="{ spin: loading }" />刷新</button></div>
         </div>
 
@@ -474,6 +475,7 @@ onBeforeUnmount(() => {
           <Pagination v-if="view !== 'overview'" :page="eventPage" :page-size="eventSize" :total="eventTotal" :disabled="loading" @change="eventPage = $event; loadPage()" @resize="eventSize = $event; eventPage = 1; loadPage()" /><div v-else class="panel-footnote"><span><Clock3 :size="13" />{{ updatedAt ? `更新于 ${shortTime(updatedAt)}` : '等待同步数据' }}</span><span>最新 {{ events.length }} 条记录</span></div>
         </section>
 
+        <PackageDownloadSettings v-if="view === 'downloads'" :refresh-token="updatedAt" />
         <EventPolicySettings v-if="view === 'security'" @saved="loadPage" /><SecurityComponentStatus v-if="view === 'security'" /><AgentEncryption v-if="view === 'encryption' || view === 'security'" :show-security="view === 'security'" />
         <template v-if="view === 'webhooks'">
           <div class="info-banner"><BellRing :size="21" /><div><strong>安全告警、异常离线与 SSH 登录通知</strong><p>主控将新告警和新入库的 SSH 登录发送到所有已启用的通知地址。每台机器每次持续异常离线仅通知一次，恢复在线后再次离线会重新通知；离线通知用中文显示最后上报时间和超时阈值。暂停后停止自动投递，仍可手动发送测试。</p><p>消息格式固定为 Lark 机器人，请填写 Lark 机器人的 Webhook 地址。测试后可在下方查看接收端响应与本次正文。</p></div></div>
