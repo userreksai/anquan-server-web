@@ -93,7 +93,7 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(poll); clearInterval(c
 <template>
   <section class="panel package-panel" aria-labelledby="package-download-heading" :aria-busy="saving">
     <header class="package-heading">
-      <div><h2 id="package-download-heading"><Download :size="21" />Agent 安装包下载</h2><p>主控统一访问软件源，Agent 经内网下载组件及依赖。复用 TCP 55556，无需开放 55557。</p></div>
+      <div><h2 id="package-download-heading"><Download :size="21" />Agent 安装包下载</h2><p>主控统一访问软件源，Agent 经内网下载组件及依赖。复用 TCP 55556</p></div>
       <span class="badge" :class="enabled ? 'success' : 'neutral'"><span class="status-dot" />{{ enabled ? '限时允许下载' : '下载已关闭' }}</span>
     </header>
     <div class="package-notice"><ShieldCheck :size="20" /><p>默认关闭。允许下载后，Agent 仅在安装期间建立临时连接；安装完成即释放。授权到期或点击关闭，会终止下载连接；配置下发与心跳继续运行。</p></div>
