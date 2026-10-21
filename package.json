@@ -14,6 +14,7 @@
     "test:event-policy": "node --test tests/event-policy.test.mjs",
     "test:downloads": "node --test tests/package-downloads.test.mjs",
     "test:updates": "node --test tests/agent-updates.test.mjs",
+    "test:component-status": "node --test tests/component-status.test.mjs",
     "test:events": "node --test tests/events.test.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 10111"
   },
