@@ -20,6 +20,11 @@ const moduleNames: Record<string, string> = {
 
 export function securityEventTitle(data: Record<string, unknown>): string {
   const kind = value(data, 'kind')
+  if (data.source === 'native_fim' && kind === 'file_change' && data.details && typeof data.details === 'object' && !Array.isArray(data.details)) {
+    const change = (data.details as Record<string, unknown>).change
+    const title = ({ added: '新增文件', modified: '文件内容或属性已修改', deleted: '文件已删除', missing: '监控文件不存在' } as Record<string, string>)[typeof change === 'string' ? change : '']
+    if (title) return title
+  }
   const labels: Record<string, string> = {
     exec: '外部程序执行', process_exec: '进程执行', process_exit: '进程退出',
     file_change: '文件发生变化', file_modified: '文件内容已修改', file_added: '新增文件', file_deleted: '文件已删除',

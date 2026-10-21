@@ -7,7 +7,7 @@ export interface SecurityProfile {
   status_interval_seconds: number
   max_queue_events: number
   auditd: { enabled: boolean; audit_exec: boolean; watch_paths: string[]; rules: string[] }
-  native_fim: { enabled: boolean; paths: string[]; poll_interval_seconds: number; report_changes: boolean; max_diff_bytes: number }
+  native_fim: { enabled: boolean; paths: string[]; poll_interval_seconds: number; report_changes: boolean; capture_created_content: boolean; max_diff_bytes: number }
   sudo: { enabled: boolean; io_logging: boolean; upload_io: boolean; max_session_bytes: number; grants: { user: string; run_as: string; commands: string[]; nopasswd: boolean }[] }
   ssh_auth: { enabled: boolean; poll_interval_seconds: number; initial_lookback_seconds: number; alert_threshold: number; window_seconds: number }
   tetragon: { enabled: boolean; version: string; download_url: string; sha256: string; config: string; tracing_policy: string }
@@ -27,7 +27,7 @@ export function defaultSecurityProfile(): SecurityProfile {
   return {
     enabled: true, install_missing: true, poll_interval_seconds: 2, status_interval_seconds: 30, max_queue_events: 10000,
     auditd: { enabled: true, audit_exec: true, watch_paths: [...criticalPaths], rules: [] },
-    native_fim: { enabled: true, paths: [...criticalPaths], poll_interval_seconds: 30, report_changes: false, max_diff_bytes: 8192 },
+    native_fim: { enabled: true, paths: [...criticalPaths], poll_interval_seconds: 30, report_changes: false, capture_created_content: true, max_diff_bytes: 8192 },
     sudo: { enabled: true, io_logging: true, upload_io: false, max_session_bytes: 20971520, grants: [] },
     ssh_auth: { enabled: true, poll_interval_seconds: 5, initial_lookback_seconds: 300, alert_threshold: 5, window_seconds: 300 },
     tetragon: { enabled: false, version: 'v1.7.1', download_url: '', sha256: '', config: '', tracing_policy: '' },
