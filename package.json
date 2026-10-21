@@ -16,6 +16,7 @@
     "test:updates": "node --test tests/agent-updates.test.mjs",
     "test:component-status": "node --test tests/component-status.test.mjs",
     "test:events": "node --test tests/events.test.mjs",
+    "test:file-snapshots": "node --test tests/file-snapshots.test.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 10111"
   },
   "dependencies": {
