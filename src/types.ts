@@ -101,6 +101,8 @@ export interface SecurityComponent {
   version?: string
   config_hash?: string
   applied_at?: string
+  policy_mode?: 'audit' | 'enforce' | string
+  checked_at?: string
   error?: string
   message?: string
   omitted_checks?: number

@@ -62,7 +62,8 @@ test('form reads server-parsed YAML, preserves advanced keys, and marks a new pr
   await state.readYaml()
   assert.equal(state.profile.value.auditd.enabled, false)
   assert.equal(state.profile.value.auditd.advanced_option, 'keep')
-  assert.equal(state.sysctlText.value, 'kernel.kptr_restrict = 2')
+  assert.equal(state.sysctlText.value, '')
+  assert.equal(state.profile.value.policies.sysctl['kernel.kptr_restrict'], '2')
   assert.equal(state.dirty.value, false)
 })
 
@@ -70,7 +71,7 @@ test('compose submits the complete form and adopts only the confirmed server YAM
   const { state, props, emitted } = mount(t)
   state.loaded.value = true
   state.changed()
-  state.sysctlText.value = 'kernel.kptr_restrict = 2'
+  state.profile.value.policies.sysctl = profileModule.setKernelPolicy({}, 'kernel.kptr_restrict', true)
   const resultYaml = '# preserved\nsecurity:\n  enabled: true\n'
   globalThis.fetch = async (_, options) => {
     const payload = JSON.parse(options.body)
@@ -171,4 +172,44 @@ test('task output safely previews UTF-8 and preserves binary or malformed output
   assert.match(eventLabels.taskOutputText('/w=='), /二进制输出/)
   assert.match(eventLabels.taskOutputText('%%%'), /编码无效/)
   assert.equal(eventLabels.securityEventTitle({ kind: 'task_failed', message: 'Scheduled task failed' }), '计划任务执行失败')
+})
+
+test('four kernel switches are independent, off by default, and preserve loaded custom values', () => {
+  const expected = { 'kernel.dmesg_restrict': '1', 'kernel.kptr_restrict': '2', 'net.ipv4.conf.all.rp_filter': '1', 'net.ipv4.tcp_syncookies': '1' }
+  assert.deepEqual(profileModule.defaultSecurityProfile().policies.sysctl, {})
+  assert.deepEqual(Object.fromEntries(profileModule.kernelPolicies.map(({ key, value }) => [key, value])), expected)
+  let values = { 'kernel.kptr_restrict': '1', 'net.ipv4.ip_forward': '0' }
+  const loaded = profileModule.mergeProfile(profileModule.defaultSecurityProfile(), { policies: { sysctl: values } })
+  assert.equal(loaded.policies.sysctl['kernel.kptr_restrict'], '1')
+  assert.equal(profileModule.advancedSysctl(values), 'net.ipv4.ip_forward = 0')
+  assert.deepEqual(profileModule.mergeAdvancedSysctl(values, 'net.ipv4.ip_forward = 1'), { 'kernel.kptr_restrict': '1', 'net.ipv4.ip_forward': '1' })
+  for (const [key, value] of Object.entries(expected)) {
+    const before = { ...values }
+    const enabled = profileModule.setKernelPolicy(values, key, true)
+    assert.deepEqual(values, before, 'toggle must not mutate the loaded config in place')
+    assert.equal(enabled[key], value)
+    values = enabled
+  }
+  values = profileModule.setKernelPolicy(values, 'kernel.kptr_restrict', false)
+  assert.equal(Object.hasOwn(values, 'kernel.kptr_restrict'), false)
+  assert.equal(values['net.ipv4.tcp_syncookies'], '1')
+  assert.equal(values['net.ipv4.ip_forward'], '0')
+  assert.throws(() => profileModule.mergeAdvancedSysctl(values, 'kernel.kptr_restrict = 1'), /独立开关/)
+})
+
+test('policy summaries separate audit, enforcement and legacy unknown evidence', () => {
+  const component = { name: 'policies', enabled: true, installed: true, running: false, state: 'drift' }
+  assert.equal(profileModule.policyMode(component), '')
+  assert.match(profileModule.policyState(component), /模式未上报/)
+  assert.equal(profileModule.policyMode({ ...component, state: 'applied' }), '')
+  assert.match(profileModule.policyState({ ...component, state: 'applied' }), /未上报核验结论/)
+  assert.match(profileModule.policyState({ ...component, policy_mode: 'audit' }), /未执行加固/)
+  assert.match(profileModule.policyState({ ...component, policy_mode: 'enforce' }), /加固结果偏离/)
+  assert.equal(profileModule.policyMode({ ...component, state: 'audit', policy_mode: 'enforce' }), 'enforce')
+  assert.equal(profileModule.policyMode({ ...component, state: 'audit', policy_mode: 'future' }), '')
+  assert.equal(profileModule.policyState({ ...component, state: 'audit' }), '仅检查')
+  assert.equal(profileModule.policyState({ ...component, state: 'audit', checks: [{ compliant: true }] }), '仅检查（已达标）')
+  assert.equal(profileModule.policyState({ ...component, state: 'no_policies' }), '未选择加固策略')
+  assert.equal(profileModule.policyState({ ...component, state: 'compliant', policy_mode: 'enforce' }), '加固检查已达标')
+  assert.equal(profileModule.policyState({ ...component, state: 'error', policy_mode: 'audit' }), '策略检查失败')
 })

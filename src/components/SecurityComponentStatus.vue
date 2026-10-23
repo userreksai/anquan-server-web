@@ -2,9 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, Download, LoaderCircle, RefreshCw, Search, Server, ShieldCheck } from 'lucide-vue-next'
 import { api, ApiError, query } from '../api'
-import { componentNames, componentReportStale, componentState, componentTruncation } from '../security-profile'
+import { componentNames, componentReportStale, componentState, componentTruncation, policyMode, policyState } from '../security-profile'
 import type { AgentConfigDelivery, ComponentReport, PageResult, SecurityComponent, SudoSession } from '../types'
 import Pagination from './Pagination.vue'
+import PolicyStatusDetails from './PolicyStatusDetails.vue'
 
 const props = defineProps<{ machineIP?: string; refreshToken?: number }>()
 const machines = ref<AgentConfigDelivery[]>([])
@@ -70,7 +71,7 @@ function toggleDetails(ip: string) {
 function clearFilters() { search.value = ''; statusFilter.value = 'all'; connectionFilter.value = 'all' }
 function componentCounts(report?: ComponentReport) {
   const enabled = (report?.data.components || []).filter(component => component.enabled && component.state !== 'disabled')
-  return { enabled: enabled.length, running: enabled.filter(component => component.running).length, error: enabled.filter(component => tone(component) === 'offline').length }
+  return { enabled: enabled.length, running: enabled.filter(component => component.name !== 'policies' && component.running).length, error: enabled.filter(component => tone(component) === 'offline' || component.name === 'policies' && ['audit_drift', 'drift'].includes(component.state)).length }
 }
 function time(value?: string) {
   if (!value) return '—'
@@ -86,8 +87,10 @@ function inventory(report: ComponentReport): string {
 }
 function tone(component: SecurityComponent) {
   if (!component.enabled || component.state === 'disabled') return 'neutral'
+  if (component.name === 'policies' && component.state === 'no_policies' && !component.error) return 'neutral'
+  if (!component.error && component.name === 'policies' && (component.state === 'audit_drift' || component.state === 'drift' && policyMode(component) === 'audit')) return 'warning'
   if (component.error || ['failed', 'error', 'install_failed', 'config_failed', 'degraded', 'unsupported', 'drift', 'stopped', 'missing', 'not_installed'].includes(component.state)) return 'offline'
-  if (component.running || ['applied', 'configured', 'ready', 'healthy', 'audit', 'audit_only'].includes(component.state)) return 'success'
+  if (component.running || ['applied', 'configured', 'ready', 'healthy', 'audit', 'audit_only', 'compliant', 'no_policies'].includes(component.state)) return 'success'
   return 'warning'
 }
 async function refreshSessions() {
@@ -148,7 +151,7 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(timer) })
     <p v-if="error" class="component-error" role="alert">{{ error }} 已保留上次读取的数据。</p>
     <template v-if="!machineIP">
       <div class="component-summary" aria-label="按组件状态筛选">
-        <button v-for="filter in ([{ value: 'all', label: '全部机器', count: summary.all }, { value: 'error', label: '组件异常', count: summary.error }, { value: 'stale', label: '历史状态', count: summary.stale }, { value: 'missing', label: '未上报', count: summary.missing }] as const)" :key="filter.value" type="button" :class="{ active: statusFilter === filter.value }" :aria-pressed="statusFilter === filter.value" @click="statusFilter = filter.value"><span>{{ filter.label }}</span><strong>{{ filter.count }}</strong></button>
+        <button v-for="filter in ([{ value: 'all', label: '全部机器', count: summary.all }, { value: 'error', label: '组件需关注', count: summary.error }, { value: 'stale', label: '历史状态', count: summary.stale }, { value: 'missing', label: '未上报', count: summary.missing }] as const)" :key="filter.value" type="button" :class="{ active: statusFilter === filter.value }" :aria-pressed="statusFilter === filter.value" @click="statusFilter = filter.value"><span>{{ filter.label }}</span><strong>{{ filter.count }}</strong></button>
       </div>
       <div class="component-filters">
         <div class="component-search"><Search :size="16" /><input v-model="search" type="search" aria-label="搜索组件状态机器" placeholder="搜索 IP、主机名或别名…" /></div>
@@ -162,8 +165,8 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(timer) })
       <article v-for="row in visible" :key="row.machine_ip" class="component-machine">
         <header>
           <div class="component-identity"><strong>{{ row.alias || row.host || row.machine_ip }}</strong><span class="mono">{{ row.machine_ip }}<template v-if="row.host && row.host !== row.alias && row.host !== row.machine_ip"> · {{ row.host }}</template></span></div>
-          <div class="component-overview"><span class="badge" :class="row.connected ? 'success' : 'neutral'">{{ row.connected ? '主控已连接' : '主控未连接' }}</span><span v-if="!row.report" class="badge neutral">尚未上报组件状态</span><span v-else class="badge" :class="stale(row.report) ? 'warning' : 'success'">{{ stale(row.report) ? '历史状态' : '最近已上报' }}</span><span v-if="row.counts.error" class="badge offline">{{ row.counts.error }} 个组件异常</span></div>
-          <div class="component-brief"><span v-if="row.report?.data.components?.length">启用 {{ row.counts.enabled }} · 运行 {{ row.counts.running }}</span><span v-else>{{ row.report ? '暂无组件明细' : '等待 Agent 上报' }}</span><span v-if="row.report" class="component-received">接收 {{ time(row.report.received_at) }}</span></div>
+          <div class="component-overview"><span class="badge" :class="row.connected ? 'success' : 'neutral'">{{ row.connected ? '主控已连接' : '主控未连接' }}</span><span v-if="!row.report" class="badge neutral">尚未上报组件状态</span><span v-else class="badge" :class="stale(row.report) ? 'warning' : 'success'">{{ stale(row.report) ? '历史状态' : '最近已上报' }}</span><span v-if="row.counts.error" class="badge offline">{{ row.counts.error }} 项需关注</span></div>
+          <div class="component-brief"><span v-if="row.report?.data.components?.length">启用 {{ row.counts.enabled }} · 采集组件运行 {{ row.counts.running }}</span><span v-else>{{ row.report ? '暂无组件明细' : '等待 Agent 上报' }}</span><span v-if="row.report" class="component-received">接收 {{ time(row.report.received_at) }}</span></div>
           <button type="button" class="button secondary small component-detail-toggle" :aria-expanded="expandedIPs.has(row.machine_ip)" :aria-controls="`component-details-${row.machine_ip}`" :aria-label="`${expandedIPs.has(row.machine_ip) ? '收起' : '展开'} ${row.alias || row.host || row.machine_ip} ${row.machine_ip} 组件详情`" @click="toggleDetails(row.machine_ip)">{{ expandedIPs.has(row.machine_ip) ? '收起详情' : '展开详情' }}<ChevronDown :size="14" :class="{ expanded: expandedIPs.has(row.machine_ip) }" /></button>
         </header>
         <div v-if="expandedIPs.has(row.machine_ip)" :id="`component-details-${row.machine_ip}`" class="component-details">
@@ -174,8 +177,9 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(timer) })
             <p v-if="inventory(row.report)" class="machine-inventory">{{ inventory(row.report) }}</p>
             <div v-if="row.report.data.components?.length" class="component-grid">
               <div v-for="component in row.report.data.components" :key="component.name" class="component-tile">
-                <div><strong>{{ componentNames[component.name] || component.name }}</strong><span class="badge" :class="tone(component)">{{ componentState(component.state) }}</span></div>
-                <p>启用 {{ component.enabled ? '是' : '否' }} · 已安装 {{ component.installed ? '是' : '否' }} · 运行 {{ component.running ? '是' : '否' }}</p>
+                <div class="component-tile-heading"><strong>{{ componentNames[component.name] || component.name }}</strong><span class="badge" :class="tone(component)">{{ component.name === 'policies' ? policyState(component) : componentState(component.state) }}</span></div>
+                <p v-if="component.name !== 'policies'">启用 {{ component.enabled ? '是' : '否' }} · 已安装 {{ component.installed ? '是' : '否' }} · 运行 {{ component.running ? '是' : '否' }}</p>
+                <PolicyStatusDetails v-else :component="component" />
                 <p v-if="component.version" class="mono">版本 {{ component.version }}</p>
                 <p v-if="component.config_hash" class="mono" :title="component.config_hash">配置 {{ component.config_hash.slice(0, 16) }}</p>
                 <p v-if="component.applied_at">应用于 {{ time(component.applied_at) }}</p>
@@ -233,7 +237,7 @@ onBeforeUnmount(() => { controller.abort(); clearInterval(timer) })
 .machine-inventory { margin: 14px 16px 0; font-size: 12px; line-height: 1.8; color: #536f9c; overflow-wrap: anywhere; }
 .component-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; padding: 16px; }
 .component-tile { padding: 13px; border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
-.component-tile > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.component-tile-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .component-tile strong { font-size: 12px; }
 .component-tile p { font-size: 11px; color: #718198; margin-top: 8px; line-height: 1.7; overflow-wrap: anywhere; }
 .status-truncation { margin: 12px 16px 0; font-size: 12px; line-height: 1.8; color: #93621b; }

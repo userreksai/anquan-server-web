@@ -25,7 +25,7 @@ function mount(t, initialProps = {}) {
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount: fn => cleanup.push(fn) }
     if (name === '../api') return apiModule
     if (name === '../security-profile') return profileModule
-    if (name === 'lucide-vue-next' || name === './Pagination.vue') return {}
+    if (name === 'lucide-vue-next' || name === './Pagination.vue' || name === './PolicyStatusDetails.vue') return {}
     throw new Error(`Unexpected import ${name}`)
   }).default
   const props = vue.reactive({ machineIP: undefined, refreshToken: 0, ...initialProps })
@@ -57,6 +57,27 @@ function respond(machines, reports, sessions = []) {
 const fleet = count => Array.from({ length: count }, (_, index) => machine(`10.0.${Math.floor((index + 1) / 256)}.${(index + 1) % 256}`))
 const ips = rows => rows.map(row => row.machine_ip)
 async function settle() { await vue.nextTick(); await Promise.resolve(); await vue.nextTick() }
+
+test('policies are checked targets rather than daemons and audit mismatches stay visible as warnings', async t => {
+  const { state } = mount(t)
+  const audit = component({ name: 'policies', installed: true, running: false, state: 'audit_drift', policy_mode: 'audit' })
+  const legacyAudit = { ...audit, state: 'drift' }
+  const compliant = { ...audit, state: 'compliant', policy_mode: 'enforce' }
+  respond([machine('10.0.0.1')], [report('10.0.0.1', { data: { components: [audit] } })])
+  await state.refresh()
+  assert.deepEqual(state.rows.value[0].counts, { enabled: 1, running: 0, error: 1 })
+  assert.equal(state.tone(audit), 'warning')
+  assert.equal(state.tone(legacyAudit), 'warning')
+  assert.equal(state.componentCounts({ data: { components: [legacyAudit] } }).error, 1)
+  assert.equal(state.tone(compliant), 'success')
+  assert.equal(state.componentCounts({ data: { components: [compliant] } }).error, 0)
+  assert.equal(state.tone({ ...audit, state: 'no_policies' }), 'neutral')
+  assert.equal(state.tone({ ...compliant, state: 'drift' }), 'offline')
+  assert.equal(state.tone({ ...audit, state: 'error', error: 'sysctl read failed' }), 'offline')
+  const template = descriptor.template.content
+  assert.match(template, /v-if="component\.name !== 'policies'">启用/)
+  assert.match(template, /<PolicyStatusDetails v-else :component="component"/)
+})
 
 test('a 300-machine fleet has bounded pages and numeric IP order independent of server order', async t => {
   const { state } = mount(t)
