@@ -142,15 +142,36 @@ test('native FIM list titles identify the user-visible added, modified and delet
   assert.equal(securityEventTitle({ kind: 'file_added' }), '新增文件')
 })
 
-function detailsComponent() {
-  const { descriptor } = parse(readFileSync(new URL('../src/components/SecurityEventDetails.vue', import.meta.url), 'utf8'))
+function detailsComponent(filename = 'SecurityEventDetails.vue') {
+  const { descriptor } = parse(readFileSync(new URL(`../src/components/${filename}`, import.meta.url), 'utf8'))
   const script = compileScript(descriptor, { id: 'file-evidence-contract' })
-  const template = compileTemplate({ source: descriptor.template.content, filename: 'SecurityEventDetails.vue', id: 'file-evidence-contract', ssr: true, cssVars: descriptor.cssVars || [], compilerOptions: { bindingMetadata: script.bindings } })
+  const template = compileTemplate({ source: descriptor.template.content, filename, id: 'file-evidence-contract', ssr: true, cssVars: descriptor.cssVars || [], compilerOptions: { bindingMetadata: script.bindings } })
   assert.deepEqual(template.errors, [])
   const { ssrRender } = loadModule(template.code)
-  const component = loadModule(script.content, name => name === 'vue' ? vue : name.startsWith('../') ? sourceModule(name.slice(3)) : require(name)).default
+  const component = loadModule(script.content, name => name === './PolicyStatusDetails.vue' ? detailsComponent('PolicyStatusDetails.vue') : name === 'vue' ? vue : name.startsWith('../') ? sourceModule(name.slice(3)) : require(name)).default
   return { ...component, ssrRender }
 }
+
+test('policy check details show expected, actual, diagnostics and unknown legacy modes as escaped text', async () => {
+  const component = { name: 'policies', enabled: true, installed: true, running: false, state: 'audit_drift', policy_mode: 'audit', checked_at: '2026-10-23T01:02:03Z', checks: [
+    { setting: 'sysctl.kernel.kptr_restrict', expected: '2', actual: '1', compliant: false, message: 'only checked' },
+    { setting: 'ssh.allow_sources', expected: '192.0.2.0/24', actual: '', compliant: false, error: '<script>denied</script>' },
+  ] }
+  const html = await renderToString(vue.createSSRApp(detailsComponent('PolicyStatusDetails.vue'), { component }))
+  assert.match(html, /仅检查（audit），未执行新的加固/)
+  assert.match(html, /检查时间：[^<]*2026/)
+  assert.match(html, /未达标 2 项/)
+  assert.match(html, /检查失败 1 项/)
+  assert.match(html, /目标<\/dt><dd>2<\/dd>/)
+  assert.match(html, /实际<\/dt><dd>1<\/dd>/)
+  assert.match(html, /only checked/)
+  assert.match(html, /&lt;script&gt;denied&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<script>/)
+  const legacy = await renderToString(vue.createSSRApp(detailsComponent('PolicyStatusDetails.vue'), { component: { ...component, policy_mode: undefined, checked_at: undefined, state: 'drift', checks: [] } }))
+  assert.match(legacy, /旧版或未知模式/)
+  assert.match(legacy, /检查时间：未上报/)
+  assert.match(legacy, /未包含检查明细/)
+})
 
 test('event detail shows captured script text as escaped text, including the retained deleted body', async () => {
   const payload = '#!/bin/sh\n<script>alert("x")</script>\necho & done'
