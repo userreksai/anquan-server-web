@@ -14,6 +14,7 @@ const templateAction = ref<'load' | 'save' | ''>('load')
 const deliveryActive = ref(false)
 const profileBusy = ref(false)
 const profileDirty = ref(false)
+const targetMachineIP = ref('')
 const delivery = ref<InstanceType<typeof AgentConfigDelivery> | null>(null)
 const pending = computed(() => busy.value || templateAction.value !== '' || deliveryActive.value || profileBusy.value)
 const error = ref('')
@@ -84,7 +85,7 @@ function download() {
 <template>
   <div class="age-config">
     <div class="info-banner"><LockKeyhole :size="23" /><div><strong>编辑配置，下发或加密后部署到 Agent</strong><p>Agent 启动时通过 ANQUAN_MASTER 连接 TCP 55556，自动获取并上报本机出口 IP，TCP 配置连接和 UDP 上报使用同一机器标识；无本地配置也可登记并等待下发。点击“下发配置”选择目标机器即可生效。</p><p>配置中的 server 控制向全部主控发送 UDP 数据，裸 IP 默认使用 55555；server: [] 关闭 UDP 上报，仍可接收配置。无需填写 agent_ip。进入页面会读取已存储的模板；手动部署时可使用程序旁的 config.age。</p></div></div>
-    <SecurityProfileEditor v-if="showSecurity" :yaml="yaml" :disabled="busy || templateAction !== '' || deliveryActive" @yaml="yaml = $event" @dirty="profileDirty = $event" @busy="profileBusy = $event" />
+    <SecurityProfileEditor v-if="showSecurity" :yaml="yaml" :target-machine-i-p="targetMachineIP" :disabled="busy || templateAction !== '' || deliveryActive" @yaml="yaml = $event" @dirty="profileDirty = $event" @busy="profileBusy = $event" @target-machine="targetMachineIP = $event" />
     <p v-if="profileDirty" class="age-error" role="status">组件表单有未写入的修改。请先点击“写入下方 YAML”，再加密、存储或下发。</p>
     <form @submit.prevent="!profileDirty && encrypt()">
       <div class="age-columns">
@@ -109,7 +110,7 @@ function download() {
       <p v-if="error" class="age-error" role="alert">{{ error }}</p>
       <p v-if="message" class="age-success" role="status">{{ message }}</p>
     </form>
-    <AgentConfigDelivery ref="delivery" :yaml="yaml" :disabled="busy || templateAction !== '' || profileBusy || profileDirty" @active="deliveryActive = $event" />
+    <AgentConfigDelivery ref="delivery" :yaml="yaml" :target-machine-i-p="targetMachineIP" :disabled="busy || templateAction !== '' || profileBusy || profileDirty" @active="deliveryActive = $event" @clear-target="targetMachineIP = ''" />
     <p class="age-footnote">点击“存储模板”会将当前 YAML 明文保存到服务器，供登录后跨浏览器、跨设备恢复；未存储的编辑不会更新模板。修改输入后旧密文会清空，请重新加密。存储和加密均检查 YAML 格式，具体字段由 Agent 启动时校验。</p>
   </div>
 </template>

@@ -21,7 +21,8 @@ export interface SecurityProfile {
   }
 }
 
-export const criticalPaths = ['/etc/passwd', '/etc/group', '/etc/shadow', '/etc/ssh', '/etc/sudoers', '/etc/sudoers.d', '/etc/crontab', '/etc/cron.d']
+export const cronPaths = ['/etc/crontab', '/etc/cron.d', '/etc/cron.hourly', '/etc/cron.daily', '/etc/cron.weekly', '/etc/cron.monthly', '/etc/cron.allow', '/etc/cron.deny', '/var/spool/cron', '/etc/anacrontab', '/etc/cron.yearly']
+export const criticalPaths = ['/etc/passwd', '/etc/group', '/etc/shadow', '/etc/ssh', '/etc/sudoers', '/etc/sudoers.d', ...cronPaths]
 
 export function defaultSecurityProfile(): SecurityProfile {
   return {

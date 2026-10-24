@@ -27,7 +27,7 @@ function mount(t, source = '# original\nserver: [127.0.0.1]\n') {
     if (name === 'vue') return { ...vue, onMounted: () => {}, onBeforeUnmount: fn => unmount.push(fn) }
     if (name === '../api') return apiModule
     if (name === '../security-profile') return profileModule
-    if (name === 'lucide-vue-next') return {}
+    if (name === 'lucide-vue-next' || name === './SshAccountPicker.vue') return {}
     throw new Error(`Unexpected import: ${name}`)
   }).default
   const props = vue.reactive({ yaml: source, disabled: false })
@@ -37,6 +37,46 @@ function mount(t, source = '# original\nserver: [127.0.0.1]\n') {
   return { state, props, emitted, unmount }
 }
 const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+test('new profiles include the complete standard cron scope without enabling enforcement or changing content defaults', () => {
+  const expectedCron = ['/etc/crontab', '/etc/cron.d', '/etc/cron.hourly', '/etc/cron.daily', '/etc/cron.weekly', '/etc/cron.monthly', '/etc/cron.allow', '/etc/cron.deny', '/var/spool/cron', '/etc/anacrontab', '/etc/cron.yearly']
+  const expected = ['/etc/passwd', '/etc/group', '/etc/shadow', '/etc/ssh', '/etc/sudoers', '/etc/sudoers.d', ...expectedCron]
+  const profile = profileModule.defaultSecurityProfile()
+  assert.deepEqual(profileModule.cronPaths, expectedCron)
+  assert.deepEqual(profile.auditd.watch_paths, expected)
+  assert.deepEqual(profile.native_fim.paths, expected)
+  assert.equal(profile.policies.mode, 'audit')
+  assert.equal(profile.native_fim.report_changes, false)
+  assert.equal(profile.native_fim.capture_created_content, true)
+  profile.auditd.watch_paths.pop()
+  profile.native_fim.paths.push('/custom')
+  assert.deepEqual(profileModule.defaultSecurityProfile().auditd.watch_paths, expected)
+  assert.deepEqual(profileModule.defaultSecurityProfile().native_fim.paths, expected)
+})
+
+test('reading and composing an existing profile preserve its explicit audit and FIM scopes', async t => {
+  const { state, props } = mount(t, '# existing deployment\nserver: []\n')
+  const existing = { auditd: { enabled: true, watch_paths: ['/etc/cron.d', '/srv/custom-audit'] }, native_fim: { enabled: true, paths: ['/srv/custom-fim'], report_changes: true }, policies: { mode: 'audit' } }
+  globalThis.fetch = async (_, options) => {
+    const payload = JSON.parse(options.body)
+    return json({ yaml: props.yaml, security: payload.security || existing })
+  }
+  await state.readYaml()
+  assert.deepEqual([...state.profile.value.auditd.watch_paths], existing.auditd.watch_paths)
+  assert.deepEqual([...state.profile.value.native_fim.paths], existing.native_fim.paths)
+  state.profile.value.auditd.audit_exec = false
+  state.changed()
+  let submitted
+  globalThis.fetch = async (_, options) => {
+    submitted = JSON.parse(options.body)
+    return json({ yaml: props.yaml, security: submitted.security })
+  }
+  await state.compose()
+  assert.deepEqual(submitted.security.auditd.watch_paths, existing.auditd.watch_paths)
+  assert.deepEqual(submitted.security.native_fim.paths, existing.native_fim.paths)
+  assert.equal(submitted.security.native_fim.report_changes, true)
+  assert.equal(submitted.security.policies.mode, 'audit')
+})
 
 test('form reads server-parsed YAML, preserves advanced keys, and marks a new preset unapplied', async t => {
   const { state, props, emitted } = mount(t)
