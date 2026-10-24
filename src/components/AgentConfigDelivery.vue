@@ -5,8 +5,8 @@ import { api } from '../api'
 import type { AgentConfigDelivery } from '../types'
 import Pagination from './Pagination.vue'
 
-const props = defineProps<{ yaml: string; disabled: boolean }>()
-const emit = defineEmits<{ active: [value: boolean] }>()
+const props = defineProps<{ yaml: string; disabled: boolean; targetMachineIP?: string }>()
+const emit = defineEmits<{ active: [value: boolean]; 'clear-target': [] }>()
 const items = ref<AgentConfigDelivery[]>([])
 const loading = ref(false)
 const submitting = ref(false)
@@ -33,13 +33,14 @@ function filterMachines(searchValue: string) {
   const value = searchValue.trim().toLocaleLowerCase()
   return items.value.filter(item => [item.machine_ip, item.host, item.alias].some(field => field?.toLocaleLowerCase().includes(value)))
 }
-const filtered = computed(() => filterMachines(search.value))
+const filtered = computed(() => filterMachines(search.value).filter(item => !props.targetMachineIP || item.machine_ip === props.targetMachineIP))
 const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const statusFiltered = computed(() => filterMachines(statusSearch.value))
 const statusVisible = computed(() => statusFiltered.value.slice((statusPage.value - 1) * statusPageSize.value, statusPage.value * statusPageSize.value))
 const allVisibleSelected = computed(() => visible.value.length > 0 && visible.value.every(item => selectedIPSet.value.has(item.machine_ip)))
 const someVisibleSelected = computed(() => visible.value.some(item => selectedIPSet.value.has(item.machine_ip)))
 watch([search, pageSize], () => { page.value = 1 })
+watch(() => props.targetMachineIP, value => { selectedIPs.value = value ? [value] : []; search.value = ''; page.value = 1; submitError.value = '' }, { flush: 'sync' })
 watch([statusSearch, statusPageSize], () => { statusPage.value = 1 })
 // A refresh can remove the last machine on a page. Keep the user on the nearest
 // valid page while preserving the search and selections on other pages.
@@ -61,7 +62,7 @@ async function refresh() {
     if (!Array.isArray(result?.items)) throw new Error('机器状态响应无效，请重试。')
     items.value = result.items
     const available = new Set(items.value.map(item => item.machine_ip))
-    selectedIPs.value = selectedIPs.value.filter(ip => available.has(ip))
+    selectedIPs.value = props.targetMachineIP ? available.has(props.targetMachineIP) ? [props.targetMachineIP] : [] : selectedIPs.value.filter(ip => available.has(ip))
     loadError.value = ''
   } catch (error) {
     if (!controller.signal.aborted) loadError.value = `读取配置下发状态失败：${error instanceof Error ? error.message : '请重试。'}`
@@ -69,11 +70,12 @@ async function refresh() {
 }
 function toggle(ip: string) {
   if (submitting.value || loading.value) return
+  if (props.targetMachineIP) return
   selectedIPs.value = selectedIPs.value.includes(ip) ? selectedIPs.value.filter(value => value !== ip) : [...selectedIPs.value, ip]
   submitError.value = ''
 }
 function toggleVisible() {
-  if (submitting.value || loading.value) return
+  if (submitting.value || loading.value || props.targetMachineIP) return
   const visibleIPs = new Set(visible.value.map(item => item.machine_ip))
   selectedIPs.value = allVisibleSelected.value ? selectedIPs.value.filter(ip => !visibleIPs.has(ip)) : [...new Set([...selectedIPs.value, ...visibleIPs])]
   submitError.value = ''
@@ -81,7 +83,7 @@ function toggleVisible() {
 async function open() {
   if (props.disabled || opened.value) return
   opened.value = true
-  selectedIPs.value = []
+  selectedIPs.value = props.targetMachineIP ? [props.targetMachineIP] : []
   search.value = ''
   page.value = 1
   submitError.value = ''
@@ -116,6 +118,7 @@ function keydown(event: KeyboardEvent) {
 async function submit() {
   if (submitting.value || loading.value || props.disabled) return
   submitError.value = ''
+  if (props.targetMachineIP && (selectedIPs.value.length !== 1 || selectedIPs.value[0] !== props.targetMachineIP || selected.value.length !== 1 || selected.value[0]?.machine_ip !== props.targetMachineIP)) { submitError.value = '当前 SSH 账户配置已绑定目标机器，请只向绑定机器下发。'; return }
   if (!selected.value.length) { submitError.value = '请至少选择一台机器。'; return }
   if (!props.yaml.trim() || new TextEncoder().encode(props.yaml).length > 4 * 1024 * 1024) { submitError.value = '请填写 YAML 配置，最大 4 MiB。'; return }
   const machineIPs = selected.value.map(item => item.machine_ip)
@@ -159,6 +162,7 @@ defineExpose({ open })
     <div class="delivery-heading"><div><h2>配置下发状态 <span class="count-tag">{{ items.length }}</span></h2><p>Agent 主动连接主控 TCP 55556，主控通过长连接投递配置。状态每 10 秒自动刷新。</p></div><button type="button" class="button secondary small" :disabled="loading || submitting" @click="refresh"><LoaderCircle v-if="loading" :size="15" class="spin" /><RefreshCw v-else :size="15" />刷新状态</button></div>
     <p v-if="message" class="delivery-success" role="status">{{ message }}</p>
     <p v-if="loadError" class="delivery-error" role="alert">{{ loadError }}</p>
+    <p v-if="targetMachineIP" class="delivery-notice delivery-binding" role="status">SSH 账户所属机器已绑定：<strong>{{ targetMachineIP }}</strong>。整份 YAML 仅可下发至该机。<button type="button" class="text-button" :disabled="submitting || opened || props.disabled" @click="emit('clear-target')">清除机器绑定</button></p>
     <div class="delivery-search delivery-status-search"><Search :size="16" /><input v-model="statusSearch" type="search" aria-label="搜索配置下发状态" placeholder="搜索 IP、主机名或别名…" /></div>
     <div v-if="statusVisible.length" class="table-scroll" :aria-busy="loading"><table class="delivery-table"><thead><tr><th>机器 / IP</th><th>配置长连接</th><th>下发状态</th><th>最新下发</th><th>应用结果</th></tr></thead><tbody><tr v-for="item in statusVisible" :key="item.machine_ip"><td><strong>{{ item.alias || item.host || item.machine_ip }}</strong><span class="delivery-ip mono">{{ item.machine_ip }}</span></td><td><span class="badge" :class="item.connected ? 'success' : 'neutral'"><span class="status-dot"></span>{{ item.connected ? '在线' : '未连接' }}</span></td><td><span class="badge" :class="statusClass(item)">{{ statusLabel(item) }}</span><span v-if="item.revision" class="delivery-meta mono" :title="item.revision">版本 {{ item.revision.slice(0, 12) }}</span></td><td class="delivery-time">{{ displayTime(item.updated_at) }}</td><td><span v-if="item.error" class="delivery-failure">{{ item.error }}</span><span v-else-if="item.status === 'applied'" class="delivery-time">{{ displayTime(item.applied_at) }}</span><span v-else class="muted">{{ item.status === 'pending' ? item.connected ? '等待 Agent 回执' : '重连后自动投递' : '—' }}</span></td></tr></tbody></table></div>
     <div v-else class="delivery-empty"><LoaderCircle v-if="loading" :size="25" class="spin" /><Server v-else :size="25" /><p>{{ loading ? '正在加载机器…' : loadError ? '暂时无法读取机器，请刷新重试。' : statusSearch.trim() ? '没有匹配的机器，请尝试其他关键词。' : '还没有机器接入。Agent 首次上报后即可选择下发。' }}</p></div>
@@ -172,18 +176,19 @@ defineExpose({ open })
           <div class="modal-body delivery-body">
             <p id="delivery-description" class="delivery-description">将编辑器中的当前 YAML 下发至所选机器，替换该机器之前下发的采集配置。主控地址和机器标识沿用本机启动配置。Agent 优先使用主控下发配置，未下发时使用可执行文件同目录的配置文件。</p>
             <p class="delivery-notice">Agent 主动连接主控 TCP 55556，无需开放 Agent 端口。长连接未在线的机器也可下发，配置会保存并在重连后自动投递。</p>
+            <p v-if="targetMachineIP" class="delivery-notice" role="status">SSH 账户配置已绑定 {{ targetMachineIP }}，仅允许向该机下发。需要切换时请关闭此窗口，在 SSH 策略中切换或清除机器绑定。</p>
             <div class="delivery-search"><Search :size="16" /><input v-model="search" type="search" aria-label="搜索下发机器" placeholder="搜索 IP、主机名或别名…" :disabled="submitting" @keydown.enter.prevent /></div>
             <div class="delivery-selection-bar">
-              <label class="delivery-check"><input type="checkbox" :checked="allVisibleSelected" :indeterminate="!allVisibleSelected && someVisibleSelected" :disabled="submitting || loading || !visible.length" @change="toggleVisible" />选择当前页</label>
+              <label class="delivery-check"><input type="checkbox" :checked="allVisibleSelected" :indeterminate="!allVisibleSelected && someVisibleSelected" :disabled="submitting || loading || !visible.length || !!targetMachineIP" @change="toggleVisible" />选择当前页</label>
               <span>已选 {{ selected.length }} 台<span v-if="selectedOffline"> · {{ selectedOffline }} 台未连接</span></span>
-              <button type="button" class="text-button" :disabled="submitting || !selected.length" @click="selectedIPs = []; submitError = ''">清空选择</button>
+              <button type="button" class="text-button" :disabled="submitting || !selected.length || !!targetMachineIP" @click="selectedIPs = []; submitError = ''">清空选择</button>
             </div>
             <p class="delivery-selection-hint">翻页和搜索会保留已选机器，确认时下发至全部已选机器。</p>
             <div v-if="loadError" class="delivery-error" role="alert">{{ loadError }} <button type="button" class="text-button" :disabled="loading || submitting" @click="refresh">重试读取</button></div>
             <div v-if="loading && !items.length" class="delivery-empty"><LoaderCircle :size="24" class="spin" /><p>正在加载机器…</p></div>
             <div v-else-if="!filtered.length" class="delivery-empty"><Server :size="24" /><p>{{ search.trim() ? '没有匹配的机器，请尝试其他关键词。' : loadError ? '读取机器失败，请稍后重试。' : '还没有可下发的机器，Agent 首次上报后即可选择。' }}</p></div>
             <div v-else class="delivery-options" :aria-busy="loading">
-              <label v-for="item in visible" :key="item.machine_ip" class="delivery-option" :class="{ selected: selectedIPSet.has(item.machine_ip) }"><input type="checkbox" :checked="selectedIPSet.has(item.machine_ip)" :aria-label="`选择 ${item.alias || item.host || item.machine_ip} ${item.machine_ip}`" :disabled="submitting || loading" @change="toggle(item.machine_ip)" /><span class="delivery-identity"><strong>{{ item.alias || item.host || item.machine_ip }}</strong><span class="mono delivery-ip">{{ item.machine_ip }}</span><span v-if="item.error" class="delivery-failure">{{ item.error }}</span></span><span class="delivery-option-status"><span class="badge" :class="item.connected ? 'success' : 'neutral'">{{ item.connected ? '长连接在线' : '长连接未连接' }}</span><span class="badge" :class="statusClass(item)">{{ statusLabel(item) }}</span></span></label>
+              <label v-for="item in visible" :key="item.machine_ip" class="delivery-option" :class="{ selected: selectedIPSet.has(item.machine_ip) }"><input type="checkbox" :checked="selectedIPSet.has(item.machine_ip)" :aria-label="`选择 ${item.alias || item.host || item.machine_ip} ${item.machine_ip}`" :disabled="submitting || loading || !!targetMachineIP" @change="toggle(item.machine_ip)" /><span class="delivery-identity"><strong>{{ item.alias || item.host || item.machine_ip }}</strong><span class="mono delivery-ip">{{ item.machine_ip }}</span><span v-if="item.error" class="delivery-failure">{{ item.error }}</span></span><span class="delivery-option-status"><span class="badge" :class="item.connected ? 'success' : 'neutral'">{{ item.connected ? '长连接在线' : '长连接未连接' }}</span><span class="badge" :class="statusClass(item)">{{ statusLabel(item) }}</span></span></label>
             </div>
             <p v-if="submitError" class="delivery-error" role="alert">{{ submitError }}</p>
           </div>
@@ -212,6 +217,7 @@ defineExpose({ open })
 .delivery-error { color: #b42318; background: #fff0ed; }
 .delivery-success { color: #14734d; background: #edf9f2; }
 .delivery-panel > .delivery-error, .delivery-panel > .delivery-success { margin: 0 22px 18px; }
+.delivery-binding { margin: 0 22px 18px; }
 .delivery-modal { width: 720px; }
 .delivery-description { margin-top: 0; }
 .delivery-notice { padding: 12px 14px; background: #f1f6ff; color: #536f9c; border-radius: 8px; margin-top: 12px; }

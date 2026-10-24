@@ -11,6 +11,7 @@
     "test:webhooks": "node --test tests/webhook-test.test.mjs",
     "test:templates": "node --test tests/agent-template.test.mjs",
     "test:security": "node --test tests/security-profile.test.mjs",
+    "test:ssh-accounts": "node --test tests/ssh-accounts.test.mjs",
     "test:event-policy": "node --test tests/event-policy.test.mjs",
     "test:downloads": "node --test tests/package-downloads.test.mjs",
     "test:updates": "node --test tests/agent-updates.test.mjs",

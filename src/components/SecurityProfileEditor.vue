@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CheckCheck, FileDown, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import { api } from '../api'
 import { advancedSysctl, defaultSecurityProfile, kernelPolicies, lines, mergeAdvancedSysctl, mergeProfile, setKernelPolicy } from '../security-profile'
+import SshAccountPicker from './SshAccountPicker.vue'
 
-const props = defineProps<{ yaml: string; disabled: boolean }>()
-const emit = defineEmits<{ yaml: [value: string]; dirty: [value: boolean]; busy: [value: boolean] }>()
+const props = defineProps<{ yaml: string; disabled: boolean; targetMachineIP?: string }>()
+const emit = defineEmits<{ yaml: [value: string]; dirty: [value: boolean]; busy: [value: boolean]; 'target-machine': [value: string] }>()
 const profile = ref(defaultSecurityProfile())
 const dirty = ref(false)
 const busy = ref(false)
@@ -19,6 +20,7 @@ const controller = new AbortController()
 let readTimer: ReturnType<typeof setTimeout> | undefined
 let requestId = 0
 let synchronizedYaml = ''
+let discoveredUsers = new Set<string>()
 const locked = computed(() => props.disabled || busy.value)
 watch(dirty, value => emit('dirty', value), { flush: 'sync' })
 watch(busy, value => emit('busy', value), { flush: 'sync' })
@@ -35,16 +37,32 @@ watch(() => props.disabled, value => { if (!value && !loaded.value && !busy.valu
 const watchPaths = computed({ get: () => profile.value.auditd.watch_paths.join('\n'), set: value => { profile.value.auditd.watch_paths = lines(value) } })
 const fimPaths = computed({ get: () => profile.value.native_fim.paths.join('\n'), set: value => { profile.value.native_fim.paths = lines(value) } })
 const auditRules = computed({ get: () => profile.value.auditd.rules.join('\n'), set: value => { profile.value.auditd.rules = lines(value) } })
-const sshUsers = computed({ get: () => profile.value.policies.ssh.allow_users.join('\n'), set: value => { profile.value.policies.ssh.allow_users = lines(value) } })
+const sshUsers = computed({ get: () => profile.value.policies.ssh.allow_users.join('\n'), set: value => { profile.value.policies.ssh.allow_users = lines(value); discoveredUsers.clear() } })
 const sshSources = computed({ get: () => profile.value.policies.ssh.allow_sources.join('\n'), set: value => { profile.value.policies.ssh.allow_sources = lines(value) } })
 const restrictUsers = computed({ get: () => profile.value.sudo.restrict_users.join('\n'), set: value => { profile.value.sudo.restrict_users = lines(value) } })
 function changeKernelPolicy(key: string, event: Event) {
   profile.value.policies.sysctl = setKernelPolicy(profile.value.policies.sysctl, key, (event.target as HTMLInputElement).checked)
   changed()
 }
+function targetMachine(value: string) { emit('target-machine', value) }
+function addDiscoveredUsers(users: string[]) {
+  if (locked.value || stale.value || !loaded.value || !props.targetMachineIP) return
+  const previous = new Set(profile.value.policies.ssh.allow_users)
+  for (const user of users) if (!previous.has(user)) discoveredUsers.add(user)
+  profile.value.policies.ssh.allow_users = [...new Set([...previous, ...users])]
+  changed()
+}
+watch(() => props.targetMachineIP, () => {
+  if (discoveredUsers.size) {
+    profile.value.policies.ssh.allow_users = profile.value.policies.ssh.allow_users.filter(user => !discoveredUsers.has(user))
+    discoveredUsers.clear()
+    changed()
+  }
+}, { flush: 'sync' })
 
 function changed() { dirty.value = true; message.value = ''; error.value = '' }
 function applyPreset(kind: 'base' | 'observe' | 'disabled') {
+  discoveredUsers.clear()
   profile.value = defaultSecurityProfile()
   if (kind === 'observe') { profile.value.install_missing = false; profile.value.sudo.enabled = false }
   if (kind === 'disabled') profile.value.enabled = false
@@ -55,12 +73,14 @@ function applyPreset(kind: 'base' | 'observe' | 'disabled') {
 async function readYaml() {
   if (props.disabled || busy.value || controller.signal.aborted) return
   const source = props.yaml
+  const replacesSource = source !== synchronizedYaml
   const id = ++requestId
   busy.value = true; error.value = ''; message.value = ''
   try {
     const result = await api<{ yaml: string; security: unknown }>('/settings/security-profile/compose', { method: 'POST', body: JSON.stringify({ yaml: source }), signal: controller.signal })
     if (controller.signal.aborted || id !== requestId || props.yaml !== source) return
     profile.value = mergeProfile(defaultSecurityProfile(), result.security)
+    if (replacesSource) discoveredUsers.clear()
     sysctlText.value = advancedSysctl(profile.value.policies.sysctl)
     grantsText.value = JSON.stringify(profile.value.sudo.grants, null, 2)
     synchronizedYaml = source; loaded.value = true; stale.value = false; dirty.value = !result.security
@@ -106,7 +126,7 @@ onBeforeUnmount(() => { clearTimeout(readTimer); controller.abort(); requestId++
     <fieldset :disabled="locked || stale || !loaded" @input="changed" @change="changed">
       <div class="security-overview"><label class="security-toggle"><input v-model="profile.enabled" type="checkbox" /><span>启用安全扩展<small>关闭后停止本模块采集，并撤回由 Agent 管理的配置及策略；已安装软件包保留。</small></span></label><label class="security-toggle"><input v-model="profile.install_missing" type="checkbox" /><span>自动安装缺少的组件<small>启用后由 Agent 使用系统包管理器安装所需依赖；需要 root 和软件源可用。</small></span></label></div>
       <div class="security-grid">
-        <article class="security-card"><label class="security-toggle"><input v-model="profile.native_fim.enabled" type="checkbox" /><span>Agent 原生文件监控<small>监控内容、权限和属主，保存基线并结合实时通知与定期补扫。</small></span></label><label>监控路径（每行一项）<textarea v-model="fimPaths" rows="5" spellcheck="false" class="mono" /><small>填写目标机器绝对路径；避免与原有 FilesMonitoring 重复配置同一检测范围。</small></label><div class="security-fields"><label>补扫间隔 / 秒<input v-model.number="profile.native_fim.poll_interval_seconds" type="number" min="1" max="86400" /></label><label>内容留存最大字节数<input v-model.number="profile.native_fim.max_diff_bytes" type="number" min="256" max="16384" /></label></div><label class="security-toggle"><input v-model="profile.native_fim.capture_created_content" type="checkbox" /><span>记录新建文件内容<small>默认开启。记录监控启用后新建文本文件及其后续版本，删除后可查看留存内容；按字节上限截断，敏感路径和二进制文件不采正文。编辑器临时文件默认不通知。</small></span></label>
+        <article class="security-card"><label class="security-toggle"><input v-model="profile.native_fim.enabled" type="checkbox" /><span>Agent 原生文件监控<small>监控内容、权限和属主，保存基线并结合实时通知与定期补扫。</small></span></label><label>监控路径（每行一项）<textarea v-model="fimPaths" rows="5" spellcheck="false" class="mono" /><small>填写目标机器绝对路径；避免与原有 FilesMonitoring 重复配置同一检测范围。</small></label><p class="security-hint">基础预设包含标准 cron/anacron 路径；已有 YAML 的路径清单保持原样。对这些标准路径，已存在先建立基线，起初不存在不创建、不告警，后续出现自动纳入。实时 FIM 与定期补扫发现状态变化；短时间多次写入可能合并，不保证每个原始写操作单独告警。</p><div class="security-fields"><label>补扫间隔 / 秒<input v-model.number="profile.native_fim.poll_interval_seconds" type="number" min="1" max="86400" /></label><label>内容留存最大字节数<input v-model.number="profile.native_fim.max_diff_bytes" type="number" min="256" max="16384" /></label></div><label class="security-toggle"><input v-model="profile.native_fim.capture_created_content" type="checkbox" /><span>记录新建文件内容<small>默认开启。记录监控启用后新建文本文件及其后续版本，删除后可查看留存内容；按字节上限截断，敏感路径和二进制文件不采正文。编辑器临时文件默认不通知。</small></span></label>
 <label class="security-toggle"><input v-model="profile.native_fim.report_changes" type="checkbox" /><span>同时留存已有文件文本<small>默认关闭。开启后也记录监控前已存在的文本及其变化；账户口令和私钥等敏感文件仍不采正文。</small></span></label></article>
         <article class="security-card"><label class="security-toggle"><input v-model="profile.auditd.enabled" type="checkbox" /><span>Linux Audit / auditd<small>由系统审计记录文件修改人与进程身份；Agent 解析关联事件并上传。</small></span></label><label class="security-toggle"><input v-model="profile.auditd.audit_exec" type="checkbox" /><span>采集外部程序执行<small>Shell 内建命令与完整终端输入不属于外部程序执行事件。</small></span></label><label>审计路径（每行一项）<textarea v-model="watchPaths" rows="5" spellcheck="false" class="mono" /><small>为关键配置增加写入和属性审计；保留其他产品的规则。</small></label><details><summary>高级 Audit 规则</summary><label>附加规则（每行一条）<textarea v-model="auditRules" rows="4" spellcheck="false" class="mono" placeholder="-w /opt/app/config -p wa -k anquan_custom" /><small>无需填写 -D 等清空全局规则命令。Agent 会校验允许的规则范围。</small></label></details></article>
         <article class="security-card"><label class="security-toggle"><input v-model="profile.sudo.enabled" type="checkbox" /><span>sudo 审计<small>使用 sudo 自身的事件与输入输出录制机制；额外授权见高级配置。</small></span></label><label class="security-toggle"><input v-model="profile.sudo.io_logging" type="checkbox" /><span>启用 sudo 输入输出录制<small>终端记录可能包含敏感输入，请按需启用上传并配置保留策略。</small></span></label><label class="security-toggle"><input v-model="profile.sudo.upload_io" type="checkbox" /><span>上传 sudo 会话文件<small>默认关闭。开启后按会话大小上限分片上传；完整文件可从平台下载并使用 sudoreplay 回放。</small></span></label><label>单个会话上传上限 / 字节<input v-model.number="profile.sudo.max_session_bytes" type="number" min="1048576" max="209715200" /></label><label>收紧 sudo 权限的账户（每行一个）<textarea v-model="restrictUsers" rows="3" spellcheck="false" placeholder="ops" /><small>enforce 下对这些账户收紧既有 sudo 权限，仅保留下方清单明确允许的命令；空授权清单表示不允许 sudo。此项可能影响运维账户，请保留恢复渠道。audit 仅检查。</small></label><details><summary>高级命令授权</summary><label>授权清单（JSON 数组）<textarea v-model="grantsText" rows="6" class="mono" spellcheck="false" placeholder='[{"user":"ops","run_as":"root","commands":["/usr/bin/systemctl status nginx"],"nopasswd":false}]' /><small>默认 [] 不新增授权。填写用户、目标身份和绝对命令路径即可，Agent 生成 sudoers；audit 模式只检查，enforce 模式才写入。未列入“收紧 sudo 权限的账户”时，此清单只添加授权，不撤销其他配置中的广泛权限。</small></label></details></article>
@@ -125,6 +145,7 @@ onBeforeUnmount(() => { clearTimeout(readTimer); controller.abort(); requestId++
             <label class="security-toggle"><input v-model="profile.policies.ssh.disable_forwarding" type="checkbox" /><span>禁用 SSH 转发<small>限制 TCP、代理、X11 等转发，可能影响隧道和跳板机用途。</small></span></label>
             <label class="security-toggle"><input v-model="profile.policies.ssh.strong_crypto" type="checkbox" /><span>使用强密码算法<small>应用 Agent 支持的加密、密钥交换与完整性算法，旧客户端可能无法连接。</small></span></label>
             <label>允许用户（每行一个）<textarea v-model="sshUsers" rows="3" spellcheck="false" placeholder="留空不设置 AllowUsers" /></label>
+            <SshAccountPicker :machine-i-p="targetMachineIP" :disabled="locked || stale || !loaded" @target-machine="targetMachine" @add="addDiscoveredUsers" />
             <label>允许来源 IP / CIDR（每行一个）<textarea v-model="sshSources" rows="3" spellcheck="false" placeholder="留空不设置来源白名单" /><small>按实际 SSH 监听端口设置来源限制。</small></label>
           </article>
           <article class="security-card">
